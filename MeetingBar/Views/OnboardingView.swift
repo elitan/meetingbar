@@ -43,9 +43,21 @@ struct OnboardingView: View {
           permissionButton("Screen & System Audio Recording", granted: screenGranted) {
             screenGranted = controller.requestScreenPermission()
           }
+          if controller.microphonePreferences.connectedMicrophones.isEmpty {
+            Label("No microphone connected", systemImage: "mic.slash")
+              .foregroundStyle(.orange)
+          } else {
+            Picker("Preferred microphone", selection: preferredMicrophoneBinding) {
+              ForEach(controller.microphonePreferences.connectedMicrophones) { microphone in
+                Text(microphone.name).tag(microphone.id)
+              }
+            }
+            .pickerStyle(.menu)
+          }
           Button("Refresh Permission Status") {
             microphoneGranted = AudioCaptureController.hasMicrophonePermission
             screenGranted = AudioCaptureController.hasScreenPermission
+            controller.refreshMicrophones()
           }
           .buttonStyle(.link)
         }
@@ -138,6 +150,19 @@ struct OnboardingView: View {
         Button("Allow", action: action)
       }
     }
+  }
+
+  private var preferredMicrophoneBinding: Binding<String> {
+    Binding(
+      get: {
+        controller.microphonePreferences.activeMicrophoneID
+          ?? controller.microphonePreferences.connectedMicrophones.first?.id
+          ?? ""
+      },
+      set: { microphoneID in
+        controller.prioritizeMicrophone(microphoneID)
+      }
+    )
   }
 
   @ViewBuilder

@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		0257E19260868D2ADFF269AE /* KeyboardShortcuts in Frameworks */ = {isa = PBXBuildFile; productRef = 94937E89D57A5CAB4AC9AAA1 /* KeyboardShortcuts */; };
+		08DD40756C3052D93CAB7BFD /* MicrophonePreferenceStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90485C10A94166F785821399 /* MicrophonePreferenceStoreTests.swift */; };
 		106ECE14CDF33AB4CEB18B67 /* MenuBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BABB71459D5426F2A672A1D1 /* MenuBarView.swift */; };
 		13101D92DD7453E5944B093B /* CaptureStateMachineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBF29C7C3880691DDF874DCF /* CaptureStateMachineTests.swift */; };
 		19A4B18D15E346A51B86069E /* WhisperKit in Frameworks */ = {isa = PBXBuildFile; productRef = 9793CFAEBD1E19B18FB381D8 /* WhisperKit */; };
@@ -33,6 +34,7 @@
 		BE3F545CE8952124EA1953CB /* PCM16WAV.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C0AA8201695A4CA8E9C2592 /* PCM16WAV.swift */; };
 		C21466687A7FEEB844A2823E /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5761805E3E910C62AFB2FFA8 /* NotificationService.swift */; };
 		C2C6D8BBA776EAE94711304A /* AudioMixer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D83DD54335EF5212A167EA8F /* AudioMixer.swift */; };
+		C72FDEF14F799303D1A9FD59 /* MicrophonePreferenceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B77ADB97E065E0F847C1670E /* MicrophonePreferenceStore.swift */; };
 		C897ECEC032D84735ECD8408 /* RecordingFileStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BA45C75242ABA8E4F0D755C /* RecordingFileStore.swift */; };
 		CB740816B4EA613359602B32 /* RetentionServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F39846E76DD906BACB9D1CD6 /* RetentionServiceTests.swift */; };
 		D3F6FC750680BAAFC8326AF2 /* LoginItemService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69B02BB88182B5624F79C53E /* LoginItemService.swift */; };
@@ -66,12 +68,14 @@
 		69B02BB88182B5624F79C53E /* LoginItemService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginItemService.swift; sourceTree = "<group>"; };
 		83D527581FF94BA37304E32C /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		86C55523F4F4CB02ACBA9CC9 /* RecordingRecoveryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingRecoveryService.swift; sourceTree = "<group>"; };
+		90485C10A94166F785821399 /* MicrophonePreferenceStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MicrophonePreferenceStoreTests.swift; sourceTree = "<group>"; };
 		95BC646778FEB332DFCBFC25 /* AudioSampleConverter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioSampleConverter.swift; sourceTree = "<group>"; };
 		9C0AA8201695A4CA8E9C2592 /* PCM16WAV.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PCM16WAV.swift; sourceTree = "<group>"; };
 		A770E19719E9A1A43DC76BF7 /* RecordingDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingDetailView.swift; sourceTree = "<group>"; };
 		A81189158A047E07AB2E5978 /* TranscriptionQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionQueue.swift; sourceTree = "<group>"; };
 		AB2369086F0CFF2E72919E24 /* AudioMixerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioMixerTests.swift; sourceTree = "<group>"; };
 		B3083521D4E42FA6075B9B42 /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
+		B77ADB97E065E0F847C1670E /* MicrophonePreferenceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MicrophonePreferenceStore.swift; sourceTree = "<group>"; };
 		BABB71459D5426F2A672A1D1 /* MenuBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarView.swift; sourceTree = "<group>"; };
 		C311C146225DEF7195982980 /* RealModelIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealModelIntegrationTests.swift; sourceTree = "<group>"; };
 		CBF29C7C3880691DDF874DCF /* CaptureStateMachineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureStateMachineTests.swift; sourceTree = "<group>"; };
@@ -147,6 +151,7 @@
 				95BC646778FEB332DFCBFC25 /* AudioSampleConverter.swift */,
 				398B8003700BCD8FB1481838 /* CaptureStateMachine.swift */,
 				69B02BB88182B5624F79C53E /* LoginItemService.swift */,
+				B77ADB97E065E0F847C1670E /* MicrophonePreferenceStore.swift */,
 				5761805E3E910C62AFB2FFA8 /* NotificationService.swift */,
 				9C0AA8201695A4CA8E9C2592 /* PCM16WAV.swift */,
 				4BA45C75242ABA8E4F0D755C /* RecordingFileStore.swift */,
@@ -162,6 +167,7 @@
 			children = (
 				AB2369086F0CFF2E72919E24 /* AudioMixerTests.swift */,
 				CBF29C7C3880691DDF874DCF /* CaptureStateMachineTests.swift */,
+				90485C10A94166F785821399 /* MicrophonePreferenceStoreTests.swift */,
 				446F24C16FBB5C565F44950B /* QueueRecoveryTests.swift */,
 				C311C146225DEF7195982980 /* RealModelIntegrationTests.swift */,
 				F39846E76DD906BACB9D1CD6 /* RetentionServiceTests.swift */,
@@ -292,6 +298,7 @@
 			files = (
 				4301D438F24A72335F379CA2 /* AudioMixerTests.swift in Sources */,
 				13101D92DD7453E5944B093B /* CaptureStateMachineTests.swift in Sources */,
+				08DD40756C3052D93CAB7BFD /* MicrophonePreferenceStoreTests.swift in Sources */,
 				977EE5E670DE5A7C807A526D /* QueueRecoveryTests.swift in Sources */,
 				4D420D3679C83F09ACB843CC /* RealModelIntegrationTests.swift in Sources */,
 				CB740816B4EA613359602B32 /* RetentionServiceTests.swift in Sources */,
@@ -316,6 +323,7 @@
 				BD6D3B736285F415A3737D8F /* MeetingBarApp.swift in Sources */,
 				EAC1FFC2C43E702AD2C06DF8 /* MeetingShortcutRecorder.swift in Sources */,
 				106ECE14CDF33AB4CEB18B67 /* MenuBarView.swift in Sources */,
+				C72FDEF14F799303D1A9FD59 /* MicrophonePreferenceStore.swift in Sources */,
 				C21466687A7FEEB844A2823E /* NotificationService.swift in Sources */,
 				5210521D42CFB08F7D9FC994 /* OnboardingView.swift in Sources */,
 				BE3F545CE8952124EA1953CB /* PCM16WAV.swift in Sources */,

@@ -42,14 +42,18 @@ final class AudioCaptureController {
   private(set) var levels = CaptureLevels()
   private(set) var elapsedSeconds: TimeInterval = 0
   private(set) var latestWarning: String?
+  private(set) var activeMicrophoneID: String?
+  private(set) var activeMicrophoneName: String?
 
   var onWarning: ((String) -> Void)?
   var onFatalFailure: ((Error) -> Void)?
 
   private let fileStore: RecordingFileStore
+  private let microphonePreferences: MicrophonePreferenceStore
   private let sampleQueue = DispatchQueue(label: "me.eliasson.meetingbar.audio-samples")
   private var stateMachine = CaptureStateMachine()
   private var stream: SCStream?
+  private var streamConfiguration: SCStreamConfiguration?
   private var streamOutput: CaptureStreamOutput?
   private var streamDelegate: CaptureStreamDelegate?
   private var elapsedTask: Task<Void, Never>?
@@ -60,8 +64,20 @@ final class AudioCaptureController {
   private var normalStopInProgress = false
   private var streamEpoch = 0
 
-  init(fileStore: RecordingFileStore) {
+  init(
+    fileStore: RecordingFileStore,
+    microphonePreferences: MicrophonePreferenceStore
+  ) {
     self.fileStore = fileStore
+    self.microphonePreferences = microphonePreferences
+    microphonePreferences.onActiveMicrophoneChanged = { [weak self] microphone in
+      guard let self else {
+        return
+      }
+      Task { @MainActor in
+        await self.applyPreferredMicrophone(microphone)
+      }
+    }
   }
 
   static var hasMicrophonePermission: Bool {
@@ -130,6 +146,7 @@ final class AudioCaptureController {
 
       let startedAt = Date.now
       try transition(.didStart(startedAt))
+      await applyPreferredMicrophone(microphonePreferences.activeMicrophone)
       beginElapsedTimer(startedAt: startedAt)
       processActivity = ProcessInfo.processInfo.beginActivity(
         options: [.idleSystemSleepDisabled, .suddenTerminationDisabled],
@@ -180,7 +197,8 @@ final class AudioCaptureController {
     guard Self.hasScreenPermission else {
       throw AudioCaptureError.permissionDenied(.screenAndSystemAudio)
     }
-    guard AVCaptureDevice.default(for: .audio) != nil else {
+    microphonePreferences.refreshDevices()
+    guard selectedMicrophoneDevice() != nil else {
       throw AudioCaptureError.noMicrophone
     }
     try fileStore.requireAvailableDiskSpace()
@@ -213,7 +231,8 @@ final class AudioCaptureController {
     configuration.channelCount = Int(PCM16WAVWriter.channelCount)
     configuration.excludesCurrentProcessAudio = true
     configuration.captureMicrophone = true
-    guard let microphone = AVCaptureDevice.default(for: .audio) else {
+    microphonePreferences.refreshDevices()
+    guard let microphone = selectedMicrophoneDevice() else {
       throw AudioCaptureError.noMicrophone
     }
     configuration.microphoneCaptureDeviceID = microphone.uniqueID
@@ -229,6 +248,48 @@ final class AudioCaptureController {
       return
     }
     stream = newStream
+    streamConfiguration = configuration
+    activeMicrophoneID = microphone.uniqueID
+    activeMicrophoneName = microphone.localizedName
+  }
+
+  private func selectedMicrophoneDevice() -> AVCaptureDevice? {
+    guard let microphoneID = microphonePreferences.activeMicrophoneID else {
+      return nil
+    }
+    return AVCaptureDevice(uniqueID: microphoneID)
+  }
+
+  private func applyPreferredMicrophone(_ microphone: MicrophonePreference?) async {
+    guard state.isRecording, let microphone else {
+      return
+    }
+    guard microphone.id != activeMicrophoneID else {
+      return
+    }
+    guard let device = AVCaptureDevice(uniqueID: microphone.id),
+      let stream,
+      let configuration = streamConfiguration
+    else {
+      return
+    }
+
+    let previousMicrophoneID = activeMicrophoneID
+    configuration.microphoneCaptureDeviceID = device.uniqueID
+    do {
+      try await stream.updateConfiguration(configuration)
+      activeMicrophoneID = device.uniqueID
+      activeMicrophoneName = device.localizedName
+      publishWarning("Microphone switched to \(device.localizedName).")
+      if microphone.id != microphonePreferences.activeMicrophoneID {
+        await applyPreferredMicrophone(microphonePreferences.activeMicrophone)
+      }
+    } catch {
+      configuration.microphoneCaptureDeviceID = previousMicrophoneID
+      publishWarning(
+        "MeetingBar could not switch to \(device.localizedName); the current input will continue if available."
+      )
+    }
   }
 
   private func handleUnexpectedStop(_ error: Error) async {
@@ -291,11 +352,14 @@ final class AudioCaptureController {
     elapsedSeconds = 0
     levels = CaptureLevels()
     stream = nil
+    streamConfiguration = nil
     streamOutput = nil
     streamDelegate = nil
     activeRecordingID = nil
     normalStopInProgress = false
     restartInProgress = false
+    activeMicrophoneID = nil
+    activeMicrophoneName = nil
     if let processActivity {
       ProcessInfo.processInfo.endActivity(processActivity)
       self.processActivity = nil

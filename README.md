@@ -1,6 +1,6 @@
 # MeetingBar
 
-MeetingBar is a private, native macOS menu-bar recorder for in-person meetings and calls. It captures the default microphone and system audio into one local WAV file, then transcribes the recording on-device with WhisperKit.
+MeetingBar is a private, native macOS menu-bar recorder for in-person meetings and calls. It captures your preferred available microphone and system audio into one local WAV file, then transcribes the recording on-device with WhisperKit.
 
 ## Requirements
 
@@ -17,6 +17,8 @@ xcodebuild -project MeetingBar.xcodeproj -scheme MeetingBar -configuration Debug
 ```
 
 The first launch walks through recording consent, permissions, the multilingual model download, the global shortcut, and launch at login. The default shortcut is Control–Option–Command–M.
+
+Microphones can be selected directly from the menu-bar menu and ordered in Settings. MeetingBar persists each device by its macOS unique identifier, uses the first connected microphone in the priority list, falls back when it disappears, and automatically returns to a higher-priority device when it reconnects. Devices remain remembered while disconnected until explicitly forgotten.
 
 Meeting metadata is stored with SwiftData. Audio and model files remain inside MeetingBar's Application Support container. Completed source audio is removed after 30 days; transcripts remain.
 
@@ -35,7 +37,7 @@ Then copy `MeetingBar.app` to `/Applications`. Keep the bundle identifier and de
 
 ## Testing calls
 
-The automated tests cover the capture state machine, hotkey debouncing, mixer alignment/silence/clipping, partial WAV repair, queue recovery, and retention boundaries. Before relying on the app, manually test the permission and hardware scenarios in the product plan, including Zoom, Teams, a browser call, headphones, speakers, device changes, sleep/wake, and force-quit recovery.
+The automated tests cover the capture state machine, hotkey debouncing, microphone priority persistence and reconnect fallback, mixer alignment/silence/clipping, partial WAV repair, queue recovery, and retention boundaries. Before relying on the app, manually test the permission and hardware scenarios in the product plan, including Zoom, Teams, a browser call, headphones, speakers, device changes, sleep/wake, and force-quit recovery.
 
 Run the fast suite with:
 

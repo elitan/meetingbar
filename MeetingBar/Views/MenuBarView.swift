@@ -49,6 +49,39 @@ struct MenuBarView: View {
     }
     .disabled(controller.capture.state == .starting || controller.capture.state == .stopping)
 
+    Menu {
+      if controller.microphonePreferences.connectedMicrophones.isEmpty {
+        Text("No microphone connected")
+      } else {
+        ForEach(controller.microphonePreferences.connectedMicrophones) { microphone in
+          Button {
+            controller.prioritizeMicrophone(microphone.id)
+          } label: {
+            Label(
+              microphone.name,
+              systemImage: microphone.id == controller.microphonePreferences.activeMicrophoneID
+                ? "checkmark.circle.fill" : "mic"
+            )
+          }
+        }
+      }
+
+      if !controller.microphonePreferences.unavailableMicrophones.isEmpty {
+        Divider()
+        Text(
+          "\(controller.microphonePreferences.unavailableMicrophones.count) unavailable microphone\(controller.microphonePreferences.unavailableMicrophones.count == 1 ? "" : "s") remembered"
+        )
+      }
+
+      Divider()
+      Button("Manage Microphone Priority…") {
+        openSettings()
+        NSApplication.shared.activate(ignoringOtherApps: true)
+      }
+    } label: {
+      Label("Microphone: \(displayedMicrophoneName)", systemImage: "mic")
+    }
+
     if let warning = controller.capture.latestWarning, controller.capture.state.isRecording {
       Text(warning)
     }
@@ -80,5 +113,12 @@ struct MenuBarView: View {
         await controller.quit()
       }
     }
+  }
+
+  private var displayedMicrophoneName: String {
+    if let activeMicrophoneName = controller.capture.activeMicrophoneName {
+      return activeMicrophoneName
+    }
+    return controller.microphonePreferences.activeMicrophone?.name ?? "None"
   }
 }

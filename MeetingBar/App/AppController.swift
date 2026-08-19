@@ -21,6 +21,7 @@ final class AppController {
 
   let capture: AudioCaptureController
   let fileStore: RecordingFileStore
+  let microphonePreferences: MicrophonePreferenceStore
 
   private let modelContext: ModelContext
   private let retentionService: RetentionService
@@ -39,7 +40,12 @@ final class AppController {
   init(modelContext: ModelContext, fileStore: RecordingFileStore) {
     self.modelContext = modelContext
     self.fileStore = fileStore
-    capture = AudioCaptureController(fileStore: fileStore)
+    let microphonePreferences = MicrophonePreferenceStore()
+    self.microphonePreferences = microphonePreferences
+    capture = AudioCaptureController(
+      fileStore: fileStore,
+      microphonePreferences: microphonePreferences
+    )
     retentionService = RetentionService(modelContext: modelContext, fileStore: fileStore)
     recoveryService = RecordingRecoveryService(modelContext: modelContext, fileStore: fileStore)
     transcriptionQueue = TranscriptionQueue(modelsURL: fileStore.modelsURL) { [weak self] event in
@@ -77,6 +83,7 @@ final class AppController {
     }
     hasLaunched = true
     launchAtLoginEnabled = loginItemService.isEnabled
+    microphonePreferences.refreshDevices()
 
     do {
       let recovered = try recoveryService.recoverPartialRecordings()
@@ -154,6 +161,26 @@ final class AppController {
 
   func completeOnboarding() {
     UserDefaults.standard.set(true, forKey: "DidCompleteOnboarding")
+  }
+
+  func prioritizeMicrophone(_ microphoneID: String) {
+    microphonePreferences.prioritize(microphoneID)
+  }
+
+  func moveMicrophoneUp(_ microphoneID: String) {
+    microphonePreferences.moveUp(microphoneID)
+  }
+
+  func moveMicrophoneDown(_ microphoneID: String) {
+    microphonePreferences.moveDown(microphoneID)
+  }
+
+  func forgetMicrophone(_ microphoneID: String) {
+    microphonePreferences.forget(microphoneID)
+  }
+
+  func refreshMicrophones() {
+    microphonePreferences.refreshDevices()
   }
 
   func save(_ recording: Recording) {
