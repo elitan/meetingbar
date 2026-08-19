@@ -10,10 +10,13 @@ struct CaptureLevels: Sendable {
 struct FinalizedCapture: Sendable {
   let audioURL: URL
   let durationSeconds: Double
+  let sources: [FinalizedCaptureSource]
 }
 
 final class AudioCaptureProcessor {
-  private let writer: PCM16WAVWriter
+  private let mixedWriter: PCM16WAVWriter
+  private var microphoneWriter: TimestampedPCM16WAVWriter?
+  private var systemWriter: TimestampedPCM16WAVWriter?
   private let microphoneConverter = AudioSampleConverter()
   private let systemConverter = AudioSampleConverter()
   private let warningHandler: @MainActor @Sendable (String) -> Void
@@ -27,11 +30,15 @@ final class AudioCaptureProcessor {
   private var finalizedCapture: FinalizedCapture?
 
   init(
-    writer: PCM16WAVWriter,
+    mixedWriter: PCM16WAVWriter,
+    microphoneWriter: TimestampedPCM16WAVWriter,
+    systemWriter: TimestampedPCM16WAVWriter,
     warningHandler: @escaping @MainActor @Sendable (String) -> Void,
     levelsHandler: @escaping @MainActor @Sendable (CaptureLevels) -> Void
   ) {
-    self.writer = writer
+    self.mixedWriter = mixedWriter
+    self.microphoneWriter = microphoneWriter
+    self.systemWriter = systemWriter
     self.warningHandler = warningHandler
     self.levelsHandler = levelsHandler
   }
@@ -44,15 +51,17 @@ final class AudioCaptureProcessor {
     do {
       switch type {
       case .audio:
-        let samples = try systemConverter.convert(sampleBuffer)
-        levels.system = peakLevel(samples)
-        mixer.appendSystem(samples)
+        let converted = try systemConverter.convert(sampleBuffer)
+        appendSource(converted, to: &systemWriter, kind: .system)
+        levels.system = peakLevel(converted.samples)
+        mixer.appendSystem(converted.samples)
         drainSystemIfMicrophoneUnavailable()
       case .microphone:
-        let samples = try microphoneConverter.convert(sampleBuffer)
+        let converted = try microphoneConverter.convert(sampleBuffer)
+        appendSource(converted, to: &microphoneWriter, kind: .microphone)
         lastMicrophoneSampleAt = .now
-        levels.microphone = peakLevel(samples)
-        try writer.append(floatSamples: mixer.mixMicrophone(samples))
+        levels.microphone = peakLevel(converted.samples)
+        try mixedWriter.append(floatSamples: mixer.mixMicrophone(converted.samples))
       case .screen:
         return
       @unknown default:
@@ -76,10 +85,27 @@ final class AudioCaptureProcessor {
       return finalizedCapture
     }
     isFinished = true
-    try writer.append(floatSamples: mixer.drainSystemTail())
-    let audioURL = try writer.finish()
-    let duration = Double(writer.sampleCount) / Double(PCM16WAVWriter.sampleRate)
-    let result = FinalizedCapture(audioURL: audioURL, durationSeconds: duration)
+    try mixedWriter.append(floatSamples: mixer.drainSystemTail())
+    let audioURL = try mixedWriter.finish()
+    var sources: [FinalizedCaptureSource] = []
+    finishSource(&microphoneWriter, into: &sources)
+    finishSource(&systemWriter, into: &sources)
+
+    let mixedDuration = Double(mixedWriter.sampleCount) / Double(PCM16WAVWriter.sampleRate)
+    let firstPresentationTime = sources.compactMap(\.firstPresentationTimeSeconds).min()
+    let sourceDuration =
+      sources.map { source in
+        let offset =
+          source.firstPresentationTimeSeconds.map { first in
+            max(0, first - (firstPresentationTime ?? first))
+          } ?? 0
+        return offset + source.durationSeconds
+      }.max() ?? 0
+    let result = FinalizedCapture(
+      audioURL: audioURL,
+      durationSeconds: max(mixedDuration, sourceDuration),
+      sources: sources
+    )
     finalizedCapture = result
     return result
   }
@@ -96,7 +122,7 @@ final class AudioCaptureProcessor {
     }
 
     do {
-      try writer.append(floatSamples: mixer.drainSystemTail())
+      try mixedWriter.append(floatSamples: mixer.drainSystemTail())
       warnOnce(
         key: "microphone-missing",
         message: "Microphone samples stopped arriving. MeetingBar continued with system audio."
@@ -110,6 +136,51 @@ final class AudioCaptureProcessor {
     samples.reduce(0) { current, sample in
       max(current, abs(sample))
     }
+  }
+
+  private func appendSource(
+    _ converted: ConvertedAudioBuffer,
+    to writer: inout TimestampedPCM16WAVWriter?,
+    kind: CaptureSourceKind
+  ) {
+    guard let activeWriter = writer else {
+      return
+    }
+    do {
+      try activeWriter.append(
+        samples: converted.samples,
+        presentationTimeSeconds: converted.presentationTimeSeconds
+      )
+    } catch {
+      writer = nil
+      warnOnce(
+        key: "source-writer-\(kind.rawValue)",
+        message:
+          "MeetingBar could not keep the separate \(kind.rawValue) track. The combined recording will continue."
+      )
+    }
+  }
+
+  private func finishSource(
+    _ writer: inout TimestampedPCM16WAVWriter?,
+    into sources: inout [FinalizedCaptureSource]
+  ) {
+    guard let activeWriter = writer else {
+      return
+    }
+    do {
+      let source = try activeWriter.finish()
+      if source.durationSeconds > 0 {
+        sources.append(source)
+      }
+    } catch {
+      warnOnce(
+        key: "source-finalize-\(activeWriter.kind.rawValue)",
+        message:
+          "MeetingBar could not finalize the separate \(activeWriter.kind.rawValue) track. Transcription will use the combined recording."
+      )
+    }
+    writer = nil
   }
 
   private func warnOnce(key: String, message: String) {

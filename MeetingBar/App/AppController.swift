@@ -22,6 +22,7 @@ final class AppController {
   let capture: AudioCaptureController
   let fileStore: RecordingFileStore
   let microphonePreferences: MicrophonePreferenceStore
+  let transcriptionPreferences: TranscriptionPreferenceStore
 
   private let modelContext: ModelContext
   private let retentionService: RetentionService
@@ -42,6 +43,7 @@ final class AppController {
     self.fileStore = fileStore
     let microphonePreferences = MicrophonePreferenceStore()
     self.microphonePreferences = microphonePreferences
+    transcriptionPreferences = TranscriptionPreferenceStore()
     capture = AudioCaptureController(
       fileStore: fileStore,
       microphonePreferences: microphonePreferences
@@ -96,6 +98,11 @@ final class AppController {
         enqueue(recording)
       }
       didFinishLaunchRecovery = true
+      if onboardingComplete {
+        Task { [weak self] in
+          await self?.prepareModel()
+        }
+      }
     } catch {
       lastErrorMessage = "Meeting recovery could not finish: \(error.localizedDescription)"
     }
@@ -128,7 +135,9 @@ final class AppController {
 
   func prepareModel() async {
     do {
-      try await transcriptionQueue.prepareModel()
+      try await transcriptionQueue.prepareModel(
+        configuration: transcriptionPreferences.configuration
+      )
     } catch {
       modelReadiness = .failed(error.localizedDescription)
       lastErrorMessage = error.localizedDescription
@@ -183,6 +192,21 @@ final class AppController {
     microphonePreferences.refreshDevices()
   }
 
+  func setTranscriptionLanguage(_ language: TranscriptionLanguagePreference) {
+    transcriptionPreferences.setLanguage(language)
+  }
+
+  func setTranscriptionQuality(_ quality: TranscriptionQuality) {
+    guard quality != transcriptionPreferences.quality else {
+      return
+    }
+    transcriptionPreferences.setQuality(quality)
+    modelReadiness = .notDownloaded
+    Task { [weak self] in
+      await self?.prepareModel()
+    }
+  }
+
   func save(_ recording: Recording) {
     recording.updatedAt = .now
     do {
@@ -208,7 +232,7 @@ final class AppController {
     save(recording)
     Task {
       await transcriptionQueue.retry(
-        TranscriptionJob(recordingID: recording.id, audioURL: url)
+        makeTranscriptionJob(recordingID: recording.id, fallbackAudioURL: url)
       )
     }
   }
@@ -235,13 +259,6 @@ final class AppController {
       return
     }
     NSWorkspace.shared.activateFileViewerSelecting([url])
-  }
-
-  func playAudio(for recording: Recording) {
-    guard let url = audioURL(for: recording) else {
-      return
-    }
-    NSWorkspace.shared.open(url)
   }
 
   func copyTranscript(_ recording: Recording) {
@@ -316,6 +333,13 @@ final class AppController {
     recording.audioRelativePath = fileStore.relativeAudioPath(for: recording.id)
     recording.audioExpiresAt = endedAt.addingTimeInterval(RetentionService.retentionInterval)
     recording.errorMessage = nil
+    if let microphone = result.sources.first(where: { $0.kind == .microphone }),
+      microphone.signal.isQuietForSpeechRecognition
+    {
+      recording.captureWarnings.append(
+        "The microphone recording was quiet and was raised for transcription. Moving the microphone closer may improve accuracy."
+      )
+    }
     save(recording)
   }
 
@@ -328,9 +352,9 @@ final class AppController {
     guard let relativePath = recording.audioRelativePath else {
       return
     }
-    let job = TranscriptionJob(
+    let job = makeTranscriptionJob(
       recordingID: recording.id,
-      audioURL: fileStore.resolve(relativePath: relativePath)
+      fallbackAudioURL: fileStore.resolve(relativePath: relativePath)
     )
     Task {
       await transcriptionQueue.enqueue(job)
@@ -339,10 +363,14 @@ final class AppController {
 
   private func handleTranscriptionEvent(_ event: TranscriptionQueueEvent) {
     switch event {
-    case .modelDownloadProgress(let progress):
-      modelReadiness = .downloading(progress)
-    case .modelReady:
-      modelReadiness = .ready
+    case .modelDownloadProgress(let modelIdentifier, let progress):
+      if modelIdentifier == transcriptionPreferences.quality.modelIdentifier {
+        modelReadiness = .downloading(progress)
+      }
+    case .modelReady(let modelIdentifier):
+      if modelIdentifier == transcriptionPreferences.quality.modelIdentifier {
+        modelReadiness = .ready
+      }
     case .started(let id):
       guard let recording = recording(id: id) else {
         return
@@ -385,6 +413,20 @@ final class AppController {
       }
     )
     return try? modelContext.fetch(descriptor).first
+  }
+
+  private func makeTranscriptionJob(
+    recordingID: UUID,
+    fallbackAudioURL: URL
+  ) -> TranscriptionJob {
+    TranscriptionJob(
+      recordingID: recordingID,
+      sources: fileStore.transcriptionSources(
+        for: recordingID,
+        fallbackAudioURL: fallbackAudioURL
+      ),
+      configuration: transcriptionPreferences.configuration
+    )
   }
 
   private func recordCaptureWarning(_ warning: String) {

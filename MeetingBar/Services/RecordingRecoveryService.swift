@@ -21,10 +21,12 @@ final class RecordingRecoveryService {
       let finalURL = fileStore.audioURL(for: id)
       do {
         _ = try WAVRepair.repairAndFinalize(partialURL: partialURL, finalURL: finalURL)
+        fileStore.recoverSourcePartials(for: id)
       } catch {
         if let recording = recordingsByID[id] {
           recording.status = .failed
-          recording.errorMessage = "The interrupted audio file could not be recovered: \(error.localizedDescription)"
+          recording.errorMessage =
+            "The interrupted audio file could not be recovered: \(error.localizedDescription)"
         }
         continue
       }
@@ -54,12 +56,14 @@ final class RecordingRecoveryService {
       else {
         continue
       }
+      fileStore.recoverSourcePartials(for: id)
       try updateRecovered(recording, audioURL: finalURL, now: now)
       recovered.append(recording)
       recoveredIDs.insert(id)
     }
 
-    for recording in existing where recording.endedAt == nil && !recoveredIDs.contains(recording.id) {
+    for recording in existing where recording.endedAt == nil && !recoveredIDs.contains(recording.id)
+    {
       recording.endedAt = now
       recording.status = .failed
       if recording.errorMessage == nil {
@@ -80,7 +84,8 @@ final class RecordingRecoveryService {
     recording.durationSeconds = duration
     recording.status = .queued
     recording.audioRelativePath = fileStore.relativeAudioPath(for: recording.id)
-    recording.audioExpiresAt = recording.endedAt?.addingTimeInterval(RetentionService.retentionInterval)
+    recording.audioExpiresAt = recording.endedAt?.addingTimeInterval(
+      RetentionService.retentionInterval)
     recording.wasRecovered = true
     recording.errorMessage = nil
     recording.updatedAt = now

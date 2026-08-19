@@ -40,14 +40,11 @@ final class RetentionService {
         hasAudio: recording.audioRelativePath != nil,
         audioDeletedAt: recording.audioDeletedAt
       )
-      guard Self.isEligible(candidate, now: now), let relativePath = recording.audioRelativePath else {
+      guard Self.isEligible(candidate, now: now), recording.audioRelativePath != nil else {
         continue
       }
 
-      let audioURL = fileStore.resolve(relativePath: relativePath)
-      if fileManager.fileExists(atPath: audioURL.path) {
-        try fileManager.removeItem(at: audioURL)
-      }
+      try fileStore.deleteRecordingFiles(for: recording.id, fileManager: fileManager)
       recording.audioRelativePath = nil
       recording.audioDeletedAt = now
       recording.updatedAt = now

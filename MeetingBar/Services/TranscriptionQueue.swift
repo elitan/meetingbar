@@ -3,12 +3,13 @@ import WhisperKit
 
 struct TranscriptionJob: Hashable, Sendable {
   let recordingID: UUID
-  let audioURL: URL
+  let sources: [TranscriptionSource]
+  let configuration: TranscriptionConfiguration
 }
 
 enum TranscriptionQueueEvent: Sendable {
-  case modelDownloadProgress(Double)
-  case modelReady
+  case modelDownloadProgress(modelIdentifier: String, progress: Double)
+  case modelReady(modelIdentifier: String)
   case started(UUID)
   case completed(recordingID: UUID, transcript: String, language: String?, modelIdentifier: String)
   case failed(recordingID: UUID, message: String)
@@ -29,14 +30,16 @@ enum TranscriptionQueueError: LocalizedError, Sendable {
 }
 
 actor TranscriptionQueue {
-  static let modelIdentifier = "large-v3-v20240930_626MB"
+  static let recommendedModelIdentifier = TranscriptionQuality.bestAccuracy.modelIdentifier
 
   private let modelsURL: URL
   private let eventHandler: @MainActor @Sendable (TranscriptionQueueEvent) -> Void
+  private let preprocessor = TranscriptionAudioPreprocessor()
   private var pendingJobs: [TranscriptionJob] = []
   private var knownJobIDs: Set<UUID> = []
   private var processingTask: Task<Void, Never>?
   private var modelPreparationTask: Task<Void, Never>?
+  private var loadedModelIdentifier: String?
   private var whisperKit: WhisperKit?
   private var modelPreparationError: TranscriptionQueueError?
 
@@ -48,20 +51,8 @@ actor TranscriptionQueue {
     self.eventHandler = eventHandler
   }
 
-  func prepareModel() async throws {
-    if whisperKit != nil {
-      return
-    }
-    if modelPreparationTask == nil {
-      modelPreparationError = nil
-      modelPreparationTask = Task { [weak self] in
-        await self?.performModelPreparation()
-      }
-    }
-    await modelPreparationTask?.value
-    if let modelPreparationError {
-      throw modelPreparationError
-    }
+  func prepareModel(configuration: TranscriptionConfiguration) async throws {
+    try await prepareModel(identifier: configuration.modelIdentifier)
   }
 
   func enqueue(_ job: TranscriptionJob) {
@@ -75,6 +66,60 @@ actor TranscriptionQueue {
   func retry(_ job: TranscriptionJob) {
     knownJobIDs.remove(job.recordingID)
     enqueue(job)
+  }
+
+  static func decodeOptions(
+    for configuration: TranscriptionConfiguration
+  ) -> DecodingOptions {
+    let language = configuration.language.whisperLanguageCode
+    return DecodingOptions(
+      task: .transcribe,
+      language: language,
+      usePrefillPrompt: true,
+      detectLanguage: language == nil,
+      skipSpecialTokens: true,
+      withoutTimestamps: false,
+      wordTimestamps: false,
+      chunkingStrategy: .vad
+    )
+  }
+
+  static func normalize(_ transcript: String) -> String {
+    transcript
+      .split(whereSeparator: \Character.isWhitespace)
+      .joined(separator: " ")
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  private func prepareModel(identifier: String) async throws {
+    if loadedModelIdentifier == identifier, whisperKit != nil {
+      return
+    }
+
+    if let existingTask = modelPreparationTask {
+      await existingTask.value
+      if loadedModelIdentifier == identifier, whisperKit != nil {
+        return
+      }
+    }
+
+    modelPreparationError = nil
+    let task = Task { [weak self] in
+      guard let self else {
+        return
+      }
+      await self.performModelPreparation(identifier: identifier)
+    }
+    modelPreparationTask = task
+    await task.value
+
+    if loadedModelIdentifier == identifier, whisperKit != nil {
+      return
+    }
+    if let modelPreparationError {
+      throw modelPreparationError
+    }
+    throw TranscriptionQueueError.modelUnavailable("The model did not finish loading.")
   }
 
   private func beginProcessingIfNeeded() {
@@ -101,34 +146,59 @@ actor TranscriptionQueue {
 
   private func process(_ job: TranscriptionJob) async {
     do {
-      guard FileManager.default.fileExists(atPath: job.audioURL.path) else {
+      let existingSources = job.sources.filter {
+        FileManager.default.fileExists(atPath: $0.audioURL.path)
+      }
+      guard !existingSources.isEmpty else {
         throw TranscriptionQueueError.audioUnavailable
       }
-      try await prepareModel()
+      try await prepareModel(identifier: job.configuration.modelIdentifier)
       guard let whisperKit else {
         throw TranscriptionQueueError.modelUnavailable("The model did not finish loading.")
       }
 
-      let results = try await whisperKit.transcribe(
-        audioPath: job.audioURL.path,
-        audioInputOptions: AudioInputOptions(audioLoadingMode: .incremental),
-        decodeOptions: DecodingOptions(
-          task: .transcribe,
-          language: nil,
-          usePrefillPrompt: true,
-          detectLanguage: true,
-          skipSpecialTokens: true,
-          withoutTimestamps: false,
-          chunkingStrategy: .vad
+      var segments: [SourceTranscriptSegment] = []
+      var languageWeights: [String: Int] = [:]
+      for source in existingSources {
+        let prepared = try preprocessor.prepare(source)
+        defer {
+          if let temporaryURL = prepared.temporaryURL {
+            try? FileManager.default.removeItem(at: temporaryURL)
+          }
+        }
+        guard prepared.shouldTranscribe else {
+          continue
+        }
+
+        let results = try await whisperKit.transcribe(
+          audioPath: prepared.audioURL.path,
+          audioInputOptions: AudioInputOptions(audioLoadingMode: .incremental),
+          decodeOptions: Self.decodeOptions(for: job.configuration)
         )
-      )
-      let transcript = Self.normalize(results.map(\.text).joined(separator: " "))
+        segments.append(
+          contentsOf: TranscriptionPostprocessor.sourceSegments(
+            from: results,
+            source: source,
+            activity: prepared.activity
+          )
+        )
+        for result in results {
+          let wordCount = max(1, Self.normalize(result.text).split(separator: " ").count)
+          languageWeights[result.language, default: 0] += wordCount
+        }
+      }
+
+      let mergedSegments = TranscriptionPostprocessor.mergeAndDeduplicate(segments)
+      let transcript = Self.normalize(mergedSegments.map(\.text).joined(separator: " "))
+      let language =
+        job.configuration.language.whisperLanguageCode
+        ?? languageWeights.max(by: { $0.value < $1.value })?.key
       await eventHandler(
         .completed(
           recordingID: job.recordingID,
           transcript: transcript,
-          language: results.first?.language,
-          modelIdentifier: Self.modelIdentifier
+          language: language,
+          modelIdentifier: job.configuration.modelIdentifier
         )
       )
     } catch {
@@ -136,9 +206,9 @@ actor TranscriptionQueue {
     }
   }
 
-  private func performModelPreparation() async {
+  private func performModelPreparation(identifier: String) async {
     do {
-      let defaultsKey = "WhisperKitModelFolder.\(Self.modelIdentifier)"
+      let defaultsKey = "WhisperKitModelFolder.\(identifier)"
       let savedPath = UserDefaults.standard.string(forKey: defaultsKey)
       let modelFolder: URL
       if let savedPath, FileManager.default.fileExists(atPath: savedPath) {
@@ -146,12 +216,12 @@ actor TranscriptionQueue {
       } else {
         let handler = eventHandler
         modelFolder = try await WhisperKit.download(
-          variant: Self.modelIdentifier,
+          variant: identifier,
           downloadBase: modelsURL,
           progressCallback: { progress in
             let fraction = progress.fractionCompleted
             Task { @MainActor in
-              handler(.modelDownloadProgress(fraction))
+              handler(.modelDownloadProgress(modelIdentifier: identifier, progress: fraction))
             }
           }
         )
@@ -159,7 +229,7 @@ actor TranscriptionQueue {
       }
 
       let configuration = WhisperKitConfig(
-        model: Self.modelIdentifier,
+        model: identifier,
         modelFolder: modelFolder.path,
         verbose: false,
         prewarm: true,
@@ -167,17 +237,168 @@ actor TranscriptionQueue {
         download: false
       )
       whisperKit = try await WhisperKit(configuration)
-      await eventHandler(.modelReady)
+      loadedModelIdentifier = identifier
+      modelPreparationError = nil
+      modelPreparationTask = nil
+      await eventHandler(.modelReady(modelIdentifier: identifier))
     } catch {
       modelPreparationError = .modelUnavailable(error.localizedDescription)
       modelPreparationTask = nil
     }
   }
 
-  private static func normalize(_ transcript: String) -> String {
-    transcript
-      .split(whereSeparator: \Character.isWhitespace)
-      .joined(separator: " ")
-      .trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
+enum TranscriptionPostprocessor {
+  static func sourceSegments(
+    from results: [TranscriptionResult],
+    source: TranscriptionSource,
+    activity: AudioActivityTimeline
+  ) -> [SourceTranscriptSegment] {
+    var segments: [SourceTranscriptSegment] = []
+    for result in results {
+      if result.segments.isEmpty {
+        let text = TranscriptionQueue.normalize(result.text)
+        if !text.isEmpty,
+          !isNonSpeechAnnotation(text),
+          activity.hasSpeechActivity(from: 0, to: activity.durationSeconds)
+        {
+          segments.append(
+            SourceTranscriptSegment(
+              source: source.kind,
+              start: source.offsetSeconds,
+              end: source.offsetSeconds,
+              text: text,
+              averageLogProbability: 0,
+              noSpeechProbability: 0
+            )
+          )
+        }
+        continue
+      }
+
+      for segment in result.segments {
+        let text = TranscriptionQueue.normalize(segment.text)
+        guard !text.isEmpty else {
+          continue
+        }
+        guard !isNonSpeechAnnotation(text) else {
+          continue
+        }
+        guard !(segment.noSpeechProb > 0.75 && segment.avgLogprob < -0.8) else {
+          continue
+        }
+        guard
+          activity.hasSpeechActivity(
+            from: Double(segment.start),
+            to: Double(segment.end)
+          )
+        else {
+          continue
+        }
+        segments.append(
+          SourceTranscriptSegment(
+            source: source.kind,
+            start: Double(segment.start) + source.offsetSeconds,
+            end: Double(segment.end) + source.offsetSeconds,
+            text: text,
+            averageLogProbability: Double(segment.avgLogprob),
+            noSpeechProbability: Double(segment.noSpeechProb)
+          )
+        )
+      }
+    }
+    return segments
   }
+
+  static func mergeAndDeduplicate(
+    _ segments: [SourceTranscriptSegment]
+  ) -> [SourceTranscriptSegment] {
+    let sorted = segments.sorted(by: segmentOrder)
+    var accepted: [SourceTranscriptSegment] = []
+
+    for candidate in sorted {
+      let duplicateIndex = accepted.indices.reversed().first { index in
+        let existing = accepted[index]
+        guard candidate.start - existing.end <= 2 else {
+          return false
+        }
+        let timeIsClose =
+          candidate.start <= existing.end + 1.5
+          && existing.start <= candidate.end + 1.5
+        let threshold = candidate.source == existing.source ? 0.92 : 0.78
+        return timeIsClose && textSimilarity(candidate.text, existing.text) >= threshold
+      }
+
+      guard let duplicateIndex else {
+        accepted.append(candidate)
+        continue
+      }
+      if qualityScore(candidate) > qualityScore(accepted[duplicateIndex]) {
+        accepted[duplicateIndex] = candidate
+      }
+    }
+
+    return accepted.sorted(by: segmentOrder)
+  }
+
+  private static func segmentOrder(
+    _ left: SourceTranscriptSegment,
+    _ right: SourceTranscriptSegment
+  ) -> Bool {
+    if left.start != right.start {
+      return left.start < right.start
+    }
+    return left.source.transcriptOrder < right.source.transcriptOrder
+  }
+
+  private static func qualityScore(_ segment: SourceTranscriptSegment) -> Double {
+    let cleanSourceBonus = segment.source == .system ? 0.1 : 0
+    return segment.averageLogProbability - segment.noSpeechProbability + cleanSourceBonus
+  }
+
+  private static func textSimilarity(_ left: String, _ right: String) -> Double {
+    let leftWords = normalizedWords(left)
+    let rightWords = normalizedWords(right)
+    guard !leftWords.isEmpty, !rightWords.isEmpty else {
+      return 0
+    }
+
+    var remainingCounts: [String: Int] = [:]
+    for word in rightWords {
+      remainingCounts[word, default: 0] += 1
+    }
+    var matches = 0
+    for word in leftWords where (remainingCounts[word] ?? 0) > 0 {
+      matches += 1
+      remainingCounts[word, default: 0] -= 1
+    }
+    return Double(2 * matches) / Double(leftWords.count + rightWords.count)
+  }
+
+  private static func normalizedWords(_ text: String) -> [String] {
+    text.lowercased().split { character in
+      !character.isLetter && !character.isNumber
+    }.map(String.init)
+  }
+
+  private static func isNonSpeechAnnotation(_ text: String) -> Bool {
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    let pairs: [(Character, Character)] = [("*", "*"), ("[", "]"), ("(", ")")]
+    guard let first = trimmed.first, let last = trimmed.last,
+      pairs.contains(where: { $0.0 == first && $0.1 == last })
+    else {
+      return false
+    }
+    return normalizedWords(trimmed).count <= 4
+  }
+}
+
+struct SourceTranscriptSegment: Sendable {
+  let source: CaptureSourceKind
+  let start: Double
+  let end: Double
+  let text: String
+  let averageLogProbability: Double
+  let noSpeechProbability: Double
 }

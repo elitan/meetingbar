@@ -16,9 +16,11 @@ struct SettingsView: View {
             .foregroundStyle(.orange)
         }
 
-        Text("MeetingBar uses the first connected microphone in this list. Unavailable devices stay in place, so a preferred microphone automatically takes over when it reconnects.")
-          .font(.caption)
-          .foregroundStyle(.secondary)
+        Text(
+          "MeetingBar uses the first connected microphone in this list. Unavailable devices stay in place, so a preferred microphone automatically takes over when it reconnects."
+        )
+        .font(.caption)
+        .foregroundStyle(.secondary)
 
         if controller.microphonePreferences.microphones.isEmpty {
           Text("Connect a microphone, then refresh this list.")
@@ -41,9 +43,11 @@ struct SettingsView: View {
         LabeledContent("Toggle recording") {
           MeetingShortcutRecorder()
         }
-        Text("MeetingBar keeps the last working shortcut when macOS or another registered shortcut rejects a new combination.")
-          .font(.caption)
-          .foregroundStyle(.secondary)
+        Text(
+          "MeetingBar keeps the last working shortcut when macOS or another registered shortcut rejects a new combination."
+        )
+        .font(.caption)
+        .foregroundStyle(.secondary)
       }
 
       Section("Permissions") {
@@ -69,6 +73,41 @@ struct SettingsView: View {
         }
       }
 
+      Section("Transcription accuracy") {
+        Picker(
+          "Meeting language",
+          selection: Binding(
+            get: { controller.transcriptionPreferences.language },
+            set: { controller.setTranscriptionLanguage($0) }
+          )
+        ) {
+          ForEach(TranscriptionLanguagePreference.allCases) { language in
+            Text(language.label).tag(language)
+          }
+        }
+
+        Picker(
+          "Model",
+          selection: Binding(
+            get: { controller.transcriptionPreferences.quality },
+            set: { controller.setTranscriptionQuality($0) }
+          )
+        ) {
+          ForEach(TranscriptionQuality.allCases) { quality in
+            Text(quality.label).tag(quality)
+          }
+        }
+
+        Text(controller.transcriptionPreferences.quality.detail)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        Text(
+          "Automatic is recommended for mixed or unknown-language meetings. Choose Swedish or English only if automatic detection picks the wrong language."
+        )
+        .font(.caption)
+        .foregroundStyle(.secondary)
+      }
+
       Section("On-device model") {
         modelStatus
         if controller.modelReadiness != .ready {
@@ -88,17 +127,21 @@ struct SettingsView: View {
             set: { _ = controller.setLaunchAtLogin($0) }
           )
         )
-        Text("Ready transcripts are kept indefinitely. Their source audio is deleted 30 days after the meeting ends. Audio for queued or failed transcripts is never deleted automatically.")
-          .font(.caption)
-          .foregroundStyle(.secondary)
+        Text(
+          "Ready transcripts are kept indefinitely. Their source audio is deleted 30 days after the meeting ends. Audio for queued or failed transcripts is never deleted automatically."
+        )
+        .font(.caption)
+        .foregroundStyle(.secondary)
       }
 
       Section("Recording consent") {
-        Text("Only record when everyone involved has been informed and recording is lawful in your location and context.")
+        Text(
+          "Only record when everyone involved has been informed and recording is lawful in your location and context."
+        )
       }
     }
     .formStyle(.grouped)
-    .frame(width: 580, height: 700)
+    .frame(width: 580, height: 780)
   }
 
   private func microphoneRow(
@@ -178,8 +221,11 @@ struct SettingsView: View {
           .font(.caption)
       }
     case .ready:
-      Label("Ready — \(TranscriptionQueue.modelIdentifier)", systemImage: "checkmark.circle.fill")
-        .foregroundStyle(.green)
+      Label(
+        "Ready — \(controller.transcriptionPreferences.quality.modelIdentifier)",
+        systemImage: "checkmark.circle.fill"
+      )
+      .foregroundStyle(.green)
     case .failed(let message):
       Label(message, systemImage: "exclamationmark.triangle")
         .foregroundStyle(.orange)

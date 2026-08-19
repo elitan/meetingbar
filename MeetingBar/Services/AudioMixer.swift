@@ -31,7 +31,7 @@ struct AudioMixer: Sendable {
       }
       let systemSample = systemSamples[readIndex]
       readIndex += 1
-      mixed.append(clamp((microphoneSample + systemSample) * 0.5))
+      mixed.append(clamp(microphoneSample + systemSample))
     }
 
     compactIfNeeded()

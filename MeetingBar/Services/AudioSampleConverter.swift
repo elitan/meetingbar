@@ -19,6 +19,11 @@ enum AudioConversionError: LocalizedError {
   }
 }
 
+struct ConvertedAudioBuffer: Sendable {
+  let samples: [Float]
+  let presentationTimeSeconds: Double?
+}
+
 final class AudioSampleConverter {
   private static let targetFormat = AVAudioFormat(
     commonFormat: .pcmFormatFloat32,
@@ -30,7 +35,7 @@ final class AudioSampleConverter {
   private var inputFormat: AVAudioFormat?
   private var converter: AVAudioConverter?
 
-  func convert(_ sampleBuffer: CMSampleBuffer) throws -> [Float] {
+  func convert(_ sampleBuffer: CMSampleBuffer) throws -> ConvertedAudioBuffer {
     guard CMSampleBufferIsValid(sampleBuffer), let buffer = sampleBuffer.audioPCMBuffer else {
       throw AudioConversionError.invalidSampleBuffer
     }
@@ -51,10 +56,12 @@ final class AudioSampleConverter {
     if let converter {
       let ratio = Self.targetFormat.sampleRate / buffer.format.sampleRate
       let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio + 1_024)
-      guard let output = AVAudioPCMBuffer(
-        pcmFormat: Self.targetFormat,
-        frameCapacity: capacity
-      ) else {
+      guard
+        let output = AVAudioPCMBuffer(
+          pcmFormat: Self.targetFormat,
+          frameCapacity: capacity
+        )
+      else {
         throw AudioConversionError.conversionFailed
       }
 
@@ -74,11 +81,20 @@ final class AudioSampleConverter {
     guard let channel = convertedBuffer.floatChannelData?[0] else {
       throw AudioConversionError.conversionFailed
     }
-    return Array(
+    let samples = Array(
       UnsafeBufferPointer(
         start: channel,
         count: Int(convertedBuffer.frameLength)
       )
+    )
+    let presentationTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+    let presentationTimeSeconds =
+      presentationTime.isValid && presentationTime.isNumeric
+      ? CMTimeGetSeconds(presentationTime)
+      : nil
+    return ConvertedAudioBuffer(
+      samples: samples,
+      presentationTimeSeconds: presentationTimeSeconds
     )
   }
 }
@@ -102,8 +118,8 @@ private final class ConverterInput: @unchecked Sendable {
   }
 }
 
-private extension CMSampleBuffer {
-  var audioPCMBuffer: AVAudioPCMBuffer? {
+extension CMSampleBuffer {
+  fileprivate var audioPCMBuffer: AVAudioPCMBuffer? {
     guard let formatDescription = CMSampleBufferGetFormatDescription(self),
       let streamDescription = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription)
     else {

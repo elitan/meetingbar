@@ -112,12 +112,28 @@ final class AudioCaptureController {
       try preflight()
       try fileStore.prepareDirectory(for: recordingID)
 
-      let writer = try PCM16WAVWriter(
+      let mixedWriter = try PCM16WAVWriter(
         partialURL: fileStore.partialAudioURL(for: recordingID),
         finalURL: fileStore.audioURL(for: recordingID)
       )
+      let microphoneWriter = try TimestampedPCM16WAVWriter(
+        kind: .microphone,
+        writer: PCM16WAVWriter(
+          partialURL: fileStore.partialSourceAudioURL(for: recordingID, kind: .microphone),
+          finalURL: fileStore.sourceAudioURL(for: recordingID, kind: .microphone)
+        )
+      )
+      let systemWriter = try TimestampedPCM16WAVWriter(
+        kind: .system,
+        writer: PCM16WAVWriter(
+          partialURL: fileStore.partialSourceAudioURL(for: recordingID, kind: .system),
+          finalURL: fileStore.sourceAudioURL(for: recordingID, kind: .system)
+        )
+      )
       let processor = AudioCaptureProcessor(
-        writer: writer,
+        mixedWriter: mixedWriter,
+        microphoneWriter: microphoneWriter,
+        systemWriter: systemWriter,
         warningHandler: { [weak self] warning in
           self?.publishWarning(warning)
         },
@@ -172,13 +188,23 @@ final class AudioCaptureController {
       do {
         try await stream.stopCapture()
       } catch {
-        publishWarning("ScreenCaptureKit reported an error while stopping: \(error.localizedDescription)")
+        publishWarning(
+          "ScreenCaptureKit reported an error while stopping: \(error.localizedDescription)")
       }
     }
 
     do {
       let result = try sampleQueue.sync {
         try output.finish()
+      }
+      if let activeRecordingID {
+        do {
+          try writeCaptureManifest(result, recordingID: activeRecordingID)
+        } catch {
+          publishWarning(
+            "MeetingBar saved the recording but could not save its separate-track timing. Transcription will use the combined audio."
+          )
+        }
       }
       cleanupAfterStop()
       try transition(.didStop)
@@ -213,8 +239,9 @@ final class AudioCaptureController {
       false,
       onScreenWindowsOnly: false
     )
-    guard let display = content.displays.first(where: { $0.displayID == CGMainDisplayID() })
-      ?? content.displays.first
+    guard
+      let display = content.displays.first(where: { $0.displayID == CGMainDisplayID() })
+        ?? content.displays.first
     else {
       throw AudioCaptureError.noDisplay
     }
@@ -334,6 +361,32 @@ final class AudioCaptureController {
   private func publishWarning(_ warning: String) {
     latestWarning = warning
     onWarning?(warning)
+  }
+
+  private func writeCaptureManifest(
+    _ capture: FinalizedCapture,
+    recordingID: UUID
+  ) throws {
+    let firstPresentationTime = capture.sources.compactMap(\.firstPresentationTimeSeconds).min()
+    let records = capture.sources.map { source in
+      let offset =
+        source.firstPresentationTimeSeconds.map { first in
+          max(0, first - (firstPresentationTime ?? first))
+        } ?? 0
+      return CaptureSourceRecord(
+        kind: source.kind,
+        fileName: source.audioURL.lastPathComponent,
+        offsetSeconds: offset,
+        durationSeconds: source.durationSeconds,
+        signal: source.signal
+      )
+    }
+    let manifest = CaptureSourceManifest(
+      microphoneID: activeMicrophoneID,
+      microphoneName: activeMicrophoneName,
+      sources: records
+    )
+    try fileStore.writeCaptureManifest(manifest, for: recordingID)
   }
 
   private func beginElapsedTimer(startedAt: Date) {

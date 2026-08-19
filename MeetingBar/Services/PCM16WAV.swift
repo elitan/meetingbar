@@ -58,6 +58,18 @@ final class PCM16WAVWriter {
     sampleCount += UInt64(floatSamples.count)
   }
 
+  func append(pcm16Samples: [Int16]) throws {
+    guard !isFinished, !pcm16Samples.isEmpty else {
+      return
+    }
+    var littleEndianSamples = pcm16Samples.map(\.littleEndian)
+    let data = littleEndianSamples.withUnsafeMutableBytes { bytes in
+      Data(bytes)
+    }
+    try fileHandle.write(contentsOf: data)
+    sampleCount += UInt64(pcm16Samples.count)
+  }
+
   func finish(fileManager: FileManager = .default) throws -> URL {
     guard !isFinished else {
       return finalURL
@@ -141,24 +153,24 @@ enum WAVRepair {
   }
 }
 
-private extension Data {
-  mutating func appendASCII(_ string: String) {
+extension Data {
+  fileprivate mutating func appendASCII(_ string: String) {
     append(string.data(using: .ascii) ?? Data())
   }
 
-  mutating func appendLittleEndian<T: FixedWidthInteger>(_ value: T) {
+  fileprivate mutating func appendLittleEndian<T: FixedWidthInteger>(_ value: T) {
     var littleEndian = value.littleEndian
     Swift.withUnsafeBytes(of: &littleEndian) { bytes in
       append(contentsOf: bytes)
     }
   }
 
-  static func littleEndian<T: FixedWidthInteger>(_ value: T) -> Data {
+  fileprivate static func littleEndian<T: FixedWidthInteger>(_ value: T) -> Data {
     var littleEndian = value.littleEndian
     return Swift.withUnsafeBytes(of: &littleEndian) { Data($0) }
   }
 
-  func asciiString(in range: Range<Int>) -> String? {
+  fileprivate func asciiString(in range: Range<Int>) -> String? {
     guard range.lowerBound >= 0, range.upperBound <= count else {
       return nil
     }

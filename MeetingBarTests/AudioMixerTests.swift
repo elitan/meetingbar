@@ -1,11 +1,12 @@
 import XCTest
+
 @testable import MeetingBar
 
 final class AudioMixerTests: XCTestCase {
   func testMixesAlignedMicrophoneAndSystemSamples() {
     var mixer = AudioMixer()
     mixer.appendSystem([0.4, -0.4])
-    assertFloatArraysEqual(mixer.mixMicrophone([0.2, 0.2]), [0.3, -0.1], accuracy: 0.0001)
+    assertFloatArraysEqual(mixer.mixMicrophone([0.2, 0.2]), [0.6, -0.2], accuracy: 0.0001)
   }
 
   func testMissingSystemInputIsSilenceAtFullMicrophoneGain() {
@@ -17,7 +18,7 @@ final class AudioMixerTests: XCTestCase {
     var mixer = AudioMixer()
     mixer.appendSystem([0.2, 0.4, 0.6])
 
-    assertFloatArraysEqual(mixer.mixMicrophone([0.2]), [0.2], accuracy: 0.0001)
+    assertFloatArraysEqual(mixer.mixMicrophone([0.2]), [0.4], accuracy: 0.0001)
     XCTAssertEqual(mixer.drainSystemTail(), [0.4, 0.6])
   }
 
@@ -25,7 +26,7 @@ final class AudioMixerTests: XCTestCase {
     var mixer = AudioMixer()
     mixer.appendSystem([0.8])
 
-    assertFloatArraysEqual(mixer.mixMicrophone([0.8, -0.4]), [0.8, -0.4], accuracy: 0.0001)
+    assertFloatArraysEqual(mixer.mixMicrophone([0.8, -0.4]), [1, -0.4], accuracy: 0.0001)
   }
 
   func testClippingIsPrevented() {
@@ -38,8 +39,8 @@ final class AudioMixerTests: XCTestCase {
   }
 }
 
-private extension XCTestCase {
-  func assertFloatArraysEqual(
+extension XCTestCase {
+  fileprivate func assertFloatArraysEqual(
     _ expression1: @autoclosure () throws -> [Float],
     _ expression2: @autoclosure () throws -> [Float],
     accuracy: Float,

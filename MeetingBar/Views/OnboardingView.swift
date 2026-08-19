@@ -20,8 +20,10 @@ struct OnboardingView: View {
           .font(.system(size: 44))
         Text("MeetingBar")
           .font(.largeTitle.bold())
-        Text("One shortcut records the room and your calls, then transcribes everything on this Mac.")
-          .foregroundStyle(.secondary)
+        Text(
+          "One shortcut records the room and your calls, then transcribes everything on this Mac."
+        )
+        .foregroundStyle(.secondary)
       }
 
       Divider()
@@ -64,13 +66,38 @@ struct OnboardingView: View {
       }
 
       setupRow(number: 3, title: "On-device transcription model") {
-        HStack {
-          modelSetupStatus
-          Spacer()
-          if controller.modelReadiness != .ready {
-            Button("Download and Prepare") {
-              Task {
-                await controller.prepareModel()
+        VStack(alignment: .leading, spacing: 10) {
+          Picker(
+            "Meeting language",
+            selection: Binding(
+              get: { controller.transcriptionPreferences.language },
+              set: { controller.setTranscriptionLanguage($0) }
+            )
+          ) {
+            ForEach(TranscriptionLanguagePreference.allCases) { language in
+              Text(language.label).tag(language)
+            }
+          }
+          Picker(
+            "Model",
+            selection: Binding(
+              get: { controller.transcriptionPreferences.quality },
+              set: { controller.setTranscriptionQuality($0) }
+            )
+          ) {
+            ForEach(TranscriptionQuality.allCases) { quality in
+              Text(quality.label).tag(quality)
+            }
+          }
+
+          HStack {
+            modelSetupStatus
+            Spacer()
+            if controller.modelReadiness != .ready {
+              Button("Download and Prepare") {
+                Task {
+                  await controller.prepareModel()
+                }
               }
             }
           }
@@ -169,7 +196,7 @@ struct OnboardingView: View {
   private var modelSetupStatus: some View {
     switch controller.modelReadiness {
     case .notDownloaded:
-      Text("626 MB multilingual Whisper model")
+      Text(controller.transcriptionPreferences.quality.detail)
         .foregroundStyle(.secondary)
     case .downloading(let progress):
       VStack(alignment: .leading) {

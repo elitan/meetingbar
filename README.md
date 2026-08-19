@@ -1,6 +1,8 @@
 # MeetingBar
 
-MeetingBar is a private, native macOS menu-bar recorder for in-person meetings and calls. It captures your preferred available microphone and system audio into one local WAV file, then transcribes the recording on-device with WhisperKit.
+MeetingBar is a private, native macOS menu-bar recorder for in-person meetings and calls. It captures your preferred available microphone and system audio, transcribes entirely on-device with WhisperKit, and keeps a searchable local transcript library.
+
+Audio plays directly inside MeetingBar. Playback measures and balances the retained microphone and system tracks independently for every recording, regardless of the connected device, then applies a soft limiter without changing either source file. Transcription uses the same timestamp-aligned tracks so each side can be normalized and recognized independently before the transcript is merged. This avoids volume loss and speaker masking from relying only on the raw mix.
 
 ## Requirements
 
@@ -20,6 +22,13 @@ The first launch walks through recording consent, permissions, the multilingual 
 
 Microphones can be selected directly from the menu-bar menu and ordered in Settings. MeetingBar persists each device by its macOS unique identifier, uses the first connected microphone in the priority list, falls back when it disappears, and automatically returns to a higher-priority device when it reconnects. Devices remain remembered while disconnected until explicitly forgotten.
 
+Settings also provides:
+
+- Automatic, Swedish, or English language selection. Automatic is the default and is recommended unless detection chooses the wrong language.
+- A full `large-v3` model for best accuracy, or the smaller `large-v3-v20240930_626MB` model.
+
+Before transcription, quiet tracks are raised toward a speech-safe level without changing the retained source recording. A limiter prevents clipping, actual audio activity is checked against Whisper timestamps to reject text invented over silence, and likely microphone echo is removed when the same speech exists on both tracks.
+
 Meeting metadata is stored with SwiftData. Audio and model files remain inside MeetingBar's Application Support container. Completed source audio is removed after 30 days; transcripts remain.
 
 ## Release installation
@@ -35,6 +44,37 @@ codesign --force --deep --sign - --options runtime \
 
 Then copy `MeetingBar.app` to `/Applications`. Keep the bundle identifier and designated requirement unchanged so macOS can associate future personal builds with the same recording permissions. This local signature is not suitable for distributing the app to other Macs.
 
+## Accuracy evaluation
+
+Public labeled audio is used as evaluation data, not to train or fine-tune the model. The download scripts make the suite reproducible while `EvaluationFixtures/` stays out of Git:
+
+```sh
+python3 scripts/download-evaluation-fixtures.py
+python3 scripts/download-ami-evaluation-fixture.py
+```
+
+The first script selects five Swedish and five English clips from Google FLEURS. The second extracts a 34-second naturally spoken, multi-person excerpt from the AMI Meeting Corpus. Both datasets are CC BY 4.0 and the generated folders include attribution.
+
+Measured on this Mac through MeetingBar's complete preprocessing and postprocessing path:
+
+| Model | FLEURS Swedish | FLEURS English | AMI meeting English |
+| --- | ---: | ---: | ---: |
+| Full `large-v3` | 9.6% WER | 3.5% WER | 9.3% WER |
+| Compact 626 MB | 12.8% WER | 4.4% WER | 8.2% WER |
+
+These are small regression sets, not broad accuracy claims. Their purpose is to catch concrete regressions in quiet-speech handling, incremental loading, multilingual decoding, and silence hallucination filtering.
+
+After the models are downloaded by MeetingBar, run either corpus with:
+
+```sh
+scripts/run-model-benchmark.sh \
+  large-v3 \
+  "/path/to/openai_whisper-large-v3" \
+  EvaluationFixtures/FLEURS/manifest.json
+```
+
+Use `EvaluationFixtures/AMI/manifest.json` for the meeting excerpt.
+
 ## Testing calls
 
 The automated tests cover the capture state machine, hotkey debouncing, microphone priority persistence and reconnect fallback, mixer alignment/silence/clipping, partial WAV repair, queue recovery, and retention boundaries. Before relying on the app, manually test the permission and hardware scenarios in the product plan, including Zoom, Teams, a browser call, headphones, speakers, device changes, sleep/wake, and force-quit recovery.
@@ -48,17 +88,4 @@ xcodebuild test \
   -destination 'platform=macOS,arch=arm64'
 ```
 
-The real WhisperKit suite is opt-in because it needs the 626 MB model and local audio fixtures named `swedish.wav`, `english.wav`, `silence.wav`, and `long-bilingual.wav`:
-
-```sh
-MEETINGBAR_RUN_MODEL_TESTS=1 \
-MEETINGBAR_MODEL_PATH=/path/to/large-v3-v20240930_626MB \
-MEETINGBAR_AUDIO_FIXTURES=/path/to/fixtures \
-xcodebuild test \
-  -project MeetingBar.xcodeproj \
-  -scheme MeetingBar \
-  -destination 'platform=macOS,arch=arm64' \
-  -only-testing:MeetingBarTests/RealModelIntegrationTests
-```
-
-The real-model suite exercises automatic language detection and incremental VAD loading for Swedish, English, silence, and a long bilingual recording. Its audio remains local.
+The opt-in real-model suite uses the same normalization, incremental VAD loading, activity filtering, and transcript normalization as the app. Generated fixtures and all personal recordings remain local.
