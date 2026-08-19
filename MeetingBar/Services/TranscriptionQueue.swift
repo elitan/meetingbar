@@ -1,4 +1,5 @@
 import Foundation
+import SpeakerKit
 import WhisperKit
 
 struct TranscriptionJob: Hashable, Sendable {
@@ -10,8 +11,17 @@ struct TranscriptionJob: Hashable, Sendable {
 enum TranscriptionQueueEvent: Sendable {
   case modelDownloadProgress(modelIdentifier: String, progress: Double)
   case modelReady(modelIdentifier: String)
+  case speakerModelPreparing
+  case speakerModelReady
+  case speakerModelFailed(String)
   case started(UUID)
-  case completed(recordingID: UUID, transcript: String, language: String?, modelIdentifier: String)
+  case completed(
+    recordingID: UUID,
+    transcript: String,
+    language: String?,
+    modelIdentifier: String,
+    warnings: [String]
+  )
   case failed(recordingID: UUID, message: String)
 }
 
@@ -42,6 +52,8 @@ actor TranscriptionQueue {
   private var loadedModelIdentifier: String?
   private var whisperKit: WhisperKit?
   private var modelPreparationError: TranscriptionQueueError?
+  private var speakerKit: SpeakerKit?
+  private var speakerPreparationTask: Task<SpeakerKit, Error>?
 
   init(
     modelsURL: URL,
@@ -53,6 +65,7 @@ actor TranscriptionQueue {
 
   func prepareModel(configuration: TranscriptionConfiguration) async throws {
     try await prepareModel(identifier: configuration.modelIdentifier)
+    _ = try? await prepareSpeakerKit()
   }
 
   func enqueue(_ job: TranscriptionJob) {
@@ -79,7 +92,7 @@ actor TranscriptionQueue {
       detectLanguage: language == nil,
       skipSpecialTokens: true,
       withoutTimestamps: false,
-      wordTimestamps: false,
+      wordTimestamps: true,
       chunkingStrategy: .vad
     )
   }
@@ -159,6 +172,7 @@ actor TranscriptionQueue {
 
       var segments: [SourceTranscriptSegment] = []
       var languageWeights: [String: Int] = [:]
+      var warnings: [String] = []
       for source in existingSources {
         let prepared = try preprocessor.prepare(source)
         defer {
@@ -175,13 +189,38 @@ actor TranscriptionQueue {
           audioInputOptions: AudioInputOptions(audioLoadingMode: .incremental),
           decodeOptions: Self.decodeOptions(for: job.configuration)
         )
-        segments.append(
-          contentsOf: TranscriptionPostprocessor.sourceSegments(
-            from: results,
-            source: source,
-            activity: prepared.activity
-          )
+        let acceptedSegments = TranscriptionPostprocessor.sourceSegments(
+          from: results,
+          source: source,
+          activity: prepared.activity
         )
+        guard !acceptedSegments.isEmpty else {
+          continue
+        }
+
+        do {
+          let speakerKit = try await prepareSpeakerKit()
+          let audio = try AudioProcessor.loadAudioAsFloatArray(fromPath: prepared.audioURL.path)
+          let diarization = try await speakerKit.diarize(audioArray: audio)
+          let attributedSegments = TranscriptionPostprocessor.speakerAttributedSourceSegments(
+            from: results,
+            diarization: diarization,
+            acceptedSegments: acceptedSegments,
+            source: source
+          )
+          if diarization.speakerCount > 0,
+            attributedSegments.contains(where: { $0.speakerID != nil })
+          {
+            segments.append(contentsOf: attributedSegments)
+          } else {
+            segments.append(contentsOf: acceptedSegments)
+            appendSpeakerFallbackWarning(for: source.kind, to: &warnings)
+          }
+        } catch {
+          segments.append(contentsOf: acceptedSegments)
+          appendSpeakerFallbackWarning(for: source.kind, to: &warnings)
+        }
+
         for result in results {
           let wordCount = max(1, Self.normalize(result.text).split(separator: " ").count)
           languageWeights[result.language, default: 0] += wordCount
@@ -189,7 +228,7 @@ actor TranscriptionQueue {
       }
 
       let mergedSegments = TranscriptionPostprocessor.mergeAndDeduplicate(segments)
-      let transcript = Self.normalize(mergedSegments.map(\.text).joined(separator: " "))
+      let transcript = SpeakerTranscriptFormatter.format(mergedSegments)
       let language =
         job.configuration.language.whisperLanguageCode
         ?? languageWeights.max(by: { $0.value < $1.value })?.key
@@ -198,7 +237,8 @@ actor TranscriptionQueue {
           recordingID: job.recordingID,
           transcript: transcript,
           language: language,
-          modelIdentifier: job.configuration.modelIdentifier
+          modelIdentifier: job.configuration.modelIdentifier,
+          warnings: warnings
         )
       )
     } catch {
@@ -244,6 +284,55 @@ actor TranscriptionQueue {
     } catch {
       modelPreparationError = .modelUnavailable(error.localizedDescription)
       modelPreparationTask = nil
+    }
+  }
+
+  private func prepareSpeakerKit() async throws -> SpeakerKit {
+    if let speakerKit {
+      return speakerKit
+    }
+    if let speakerPreparationTask {
+      return try await speakerPreparationTask.value
+    }
+
+    let modelDirectory = modelsURL.appending(
+      path: "SpeakerKit",
+      directoryHint: .isDirectory
+    )
+    let configuration = PyannoteConfig(
+      downloadBase: modelDirectory.path,
+      download: true,
+      load: false,
+      verbose: false
+    )
+    await eventHandler(.speakerModelPreparing)
+    let task = Task {
+      try await SpeakerKit(configuration)
+    }
+    speakerPreparationTask = task
+
+    do {
+      let prepared = try await task.value
+      speakerKit = prepared
+      speakerPreparationTask = nil
+      await eventHandler(.speakerModelReady)
+      return prepared
+    } catch {
+      speakerPreparationTask = nil
+      await eventHandler(.speakerModelFailed(error.localizedDescription))
+      throw error
+    }
+  }
+
+  private func appendSpeakerFallbackWarning(
+    for source: CaptureSourceKind,
+    to warnings: inout [String]
+  ) {
+    let sourceName = source == .microphone ? "microphone" : "system audio"
+    let warning =
+      "Speaker detection was unavailable for \(sourceName), so a source-level speaker label was used."
+    if !warnings.contains(warning) {
+      warnings.append(warning)
     }
   }
 
@@ -342,6 +431,56 @@ enum TranscriptionPostprocessor {
     return accepted.sorted(by: segmentOrder)
   }
 
+  static func speakerAttributedSourceSegments(
+    from results: [TranscriptionResult],
+    diarization: DiarizationResult,
+    acceptedSegments: [SourceTranscriptSegment],
+    source: TranscriptionSource
+  ) -> [SourceTranscriptSegment] {
+    let speakerGroups = diarization.addSpeakerInfo(to: results, strategy: .subsegment)
+    var attributed: [SourceTranscriptSegment] = []
+
+    for speakerSegment in speakerGroups.flatMap({ $0 }) {
+      let text = TranscriptionQueue.normalize(speakerSegment.text)
+      guard !text.isEmpty else {
+        continue
+      }
+
+      let start = Double(speakerSegment.startTime) + source.offsetSeconds
+      let end = Double(speakerSegment.endTime) + source.offsetSeconds
+      guard
+        let accepted = acceptedSegments.max(by: { left, right in
+          overlapDuration(start: start, end: end, with: left)
+            < overlapDuration(start: start, end: end, with: right)
+        }),
+        overlapDuration(start: start, end: end, with: accepted) > 0
+      else {
+        continue
+      }
+
+      attributed.append(
+        SourceTranscriptSegment(
+          source: source.kind,
+          start: start,
+          end: end,
+          text: text,
+          averageLogProbability: accepted.averageLogProbability,
+          noSpeechProbability: accepted.noSpeechProbability,
+          speakerID: speakerSegment.speaker.speakerId
+        )
+      )
+    }
+
+    for accepted in acceptedSegments
+    where !attributed.contains(where: {
+      overlapDuration(start: $0.start, end: $0.end, with: accepted) > 0
+    }) {
+      attributed.append(accepted)
+    }
+
+    return attributed.sorted(by: segmentOrder)
+  }
+
   private static func segmentOrder(
     _ left: SourceTranscriptSegment,
     _ right: SourceTranscriptSegment
@@ -382,6 +521,14 @@ enum TranscriptionPostprocessor {
     }.map(String.init)
   }
 
+  private static func overlapDuration(
+    start: Double,
+    end: Double,
+    with segment: SourceTranscriptSegment
+  ) -> Double {
+    max(0, min(end, segment.end) - max(start, segment.start))
+  }
+
   private static func isNonSpeechAnnotation(_ text: String) -> Bool {
     let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
     let pairs: [(Character, Character)] = [("*", "*"), ("[", "]"), ("(", ")")]
@@ -401,4 +548,23 @@ struct SourceTranscriptSegment: Sendable {
   let text: String
   let averageLogProbability: Double
   let noSpeechProbability: Double
+  let speakerID: Int?
+
+  init(
+    source: CaptureSourceKind,
+    start: Double,
+    end: Double,
+    text: String,
+    averageLogProbability: Double,
+    noSpeechProbability: Double,
+    speakerID: Int? = nil
+  ) {
+    self.source = source
+    self.start = start
+    self.end = end
+    self.text = text
+    self.averageLogProbability = averageLogProbability
+    self.noSpeechProbability = noSpeechProbability
+    self.speakerID = speakerID
+  }
 }

@@ -13,12 +13,24 @@ struct RecordingDetailView: View {
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 20) {
-        TextField("Meeting title", text: $recording.title)
-          .font(.title2.weight(.semibold))
-          .textFieldStyle(.plain)
-          .onSubmit {
+        HStack(spacing: 12) {
+          TextField("Meeting title", text: $recording.title)
+            .font(.title2.weight(.semibold))
+            .textFieldStyle(.plain)
+            .onSubmit {
+              controller.save(recording)
+            }
+
+          Button {
+            recording.isPinned.toggle()
             controller.save(recording)
+          } label: {
+            Image(systemName: recording.isPinned ? "pin.fill" : "pin")
           }
+          .buttonStyle(.plain)
+          .foregroundStyle(recording.isPinned ? Color.accentColor : Color.secondary)
+          .help(recording.isPinned ? "Unpin meeting" : "Pin meeting")
+        }
 
         HStack(spacing: 10) {
           StatusBadge(recording: recording)
@@ -52,7 +64,7 @@ struct RecordingDetailView: View {
         }
 
         if !recording.captureWarnings.isEmpty {
-          DisclosureGroup("Capture warnings (\(recording.captureWarnings.count))") {
+          DisclosureGroup("Warnings (\(recording.captureWarnings.count))") {
             VStack(alignment: .leading, spacing: 6) {
               ForEach(Array(recording.captureWarnings.enumerated()), id: \.offset) { _, warning in
                 Text("• \(warning)")
@@ -85,6 +97,17 @@ struct RecordingDetailView: View {
             if recording.status == .ready, !recording.transcript.isEmpty {
               Button("Copy Transcript", systemImage: "doc.on.doc") {
                 controller.copyTranscript(recording)
+              }
+            }
+
+            if recording.status == .ready, controller.audioURL(for: recording) != nil {
+              Button(
+                SpeakerTranscriptFormatter.containsSpeakerLabels(recording.transcript)
+                  ? "Transcribe Again"
+                  : "Detect Speakers",
+                systemImage: "person.2.wave.2"
+              ) {
+                controller.retry(recording)
               }
             }
           }

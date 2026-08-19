@@ -18,11 +18,33 @@ struct LibraryView: View {
     }
   }
 
+  private var pinnedRecordings: [Recording] {
+    filteredRecordings.filter(\.isPinned)
+  }
+
+  private var unpinnedRecordings: [Recording] {
+    filteredRecordings.filter { !$0.isPinned }
+  }
+
+  private var orderedRecordings: [Recording] {
+    pinnedRecordings + unpinnedRecordings
+  }
+
   var body: some View {
     NavigationSplitView {
-      List(filteredRecordings, selection: $selectedRecordingID) { recording in
-        RecordingRow(recording: recording)
-          .tag(recording.id)
+      List(selection: $selectedRecordingID) {
+        if pinnedRecordings.isEmpty {
+          recordingRows(unpinnedRecordings)
+        } else {
+          Section("Pinned") {
+            recordingRows(pinnedRecordings)
+          }
+          if !unpinnedRecordings.isEmpty {
+            Section("Meetings") {
+              recordingRows(unpinnedRecordings)
+            }
+          }
+        }
       }
       .navigationTitle("Meetings")
       .searchable(text: $searchText, prompt: "Search titles and transcripts")
@@ -53,20 +75,64 @@ struct LibraryView: View {
     .navigationSplitViewStyle(.balanced)
     .onAppear {
       if selectedRecordingID == nil {
-        selectedRecordingID = recordings.first?.id
+        selectedRecordingID = orderedRecordings.first?.id
       }
+    }
+  }
+
+  @ViewBuilder
+  private func recordingRows(_ rows: [Recording]) -> some View {
+    ForEach(rows) { recording in
+      RecordingRow(recording: recording, controller: controller)
+        .tag(recording.id)
     }
   }
 }
 
 private struct RecordingRow: View {
-  let recording: Recording
+  @Bindable var recording: Recording
+  let controller: AppController
+  @State private var isRenaming = false
+  @State private var draftTitle = ""
+  @State private var isHovering = false
+  @FocusState private var isTitleFocused: Bool
 
   var body: some View {
     VStack(alignment: .leading, spacing: 5) {
-      Text(recording.title)
-        .font(.headline)
-        .lineLimit(1)
+      HStack(spacing: 6) {
+        if isRenaming {
+          TextField("Meeting title", text: $draftTitle)
+            .font(.headline)
+            .textFieldStyle(.plain)
+            .focused($isTitleFocused)
+            .onSubmit {
+              commitRename()
+            }
+            .onExitCommand {
+              cancelRename()
+            }
+        } else {
+          Text(recording.title)
+            .font(.headline)
+            .lineLimit(1)
+            .onTapGesture(count: 2) {
+              beginRename()
+            }
+        }
+
+        Spacer(minLength: 4)
+
+        if recording.isPinned || isHovering {
+          Button {
+            togglePin()
+          } label: {
+            Image(systemName: recording.isPinned ? "pin.fill" : "pin")
+              .foregroundStyle(recording.isPinned ? Color.accentColor : Color.secondary)
+          }
+          .buttonStyle(.plain)
+          .help(recording.isPinned ? "Unpin meeting" : "Pin meeting")
+        }
+      }
       HStack(spacing: 6) {
         StatusBadge(recording: recording)
         Text(recording.startedAt, format: .dateTime.year().month().day().hour().minute())
@@ -78,6 +144,55 @@ private struct RecordingRow: View {
       .foregroundStyle(.secondary)
     }
     .padding(.vertical, 4)
+    .contentShape(Rectangle())
+    .onHover { hovering in
+      isHovering = hovering
+    }
+    .onChange(of: isTitleFocused) { wasFocused, isFocused in
+      if wasFocused, !isFocused, isRenaming {
+        commitRename()
+      }
+    }
+    .contextMenu {
+      Button(recording.isPinned ? "Unpin" : "Pin") {
+        togglePin()
+      }
+      Button("Rename") {
+        beginRename()
+      }
+    }
+  }
+
+  private func beginRename() {
+    draftTitle = recording.title
+    isRenaming = true
+    Task { @MainActor in
+      isTitleFocused = true
+    }
+  }
+
+  private func commitRename() {
+    guard isRenaming else {
+      return
+    }
+    let title = draftTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !title.isEmpty, title != recording.title {
+      recording.title = title
+      controller.save(recording)
+    }
+    isRenaming = false
+    isTitleFocused = false
+  }
+
+  private func cancelRename() {
+    draftTitle = recording.title
+    isRenaming = false
+    isTitleFocused = false
+  }
+
+  private func togglePin() {
+    recording.isPinned.toggle()
+    controller.save(recording)
   }
 }
 
@@ -111,4 +226,3 @@ struct StatusBadge: View {
       .foregroundStyle(color)
   }
 }
-

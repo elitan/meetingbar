@@ -25,6 +25,7 @@ enum RecordingStatus: String, Codable, CaseIterable, Sendable {
 final class Recording {
   @Attribute(.unique) var id: UUID
   var title: String
+  var isPinned: Bool = false
   var startedAt: Date
   var endedAt: Date?
   var durationSeconds: Double
@@ -44,6 +45,7 @@ final class Recording {
   init(
     id: UUID = UUID(),
     title: String,
+    isPinned: Bool = false,
     startedAt: Date = .now,
     endedAt: Date? = nil,
     durationSeconds: Double = 0,
@@ -62,6 +64,7 @@ final class Recording {
   ) {
     self.id = id
     self.title = title
+    self.isPinned = isPinned
     self.startedAt = startedAt
     self.endedAt = endedAt
     self.durationSeconds = durationSeconds
@@ -91,4 +94,3 @@ final class Recording {
     endedAt == nil && audioRelativePath == nil
   }
 }
-

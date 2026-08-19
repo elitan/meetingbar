@@ -108,10 +108,13 @@ struct SettingsView: View {
         .foregroundStyle(.secondary)
       }
 
-      Section("On-device model") {
+      Section("On-device models") {
         modelStatus
-        if controller.modelReadiness != .ready {
-          Button("Download or Prepare Model") {
+        speakerModelStatus
+        if controller.modelReadiness != .ready
+          || controller.speakerModelReadiness != .ready
+        {
+          Button("Download or Prepare Models") {
             Task {
               await controller.prepareModel()
             }
@@ -222,12 +225,32 @@ struct SettingsView: View {
       }
     case .ready:
       Label(
-        "Ready — \(controller.transcriptionPreferences.quality.modelIdentifier)",
+        "Speech ready — \(controller.transcriptionPreferences.quality.modelIdentifier)",
         systemImage: "checkmark.circle.fill"
       )
       .foregroundStyle(.green)
     case .failed(let message):
       Label(message, systemImage: "exclamationmark.triangle")
+        .foregroundStyle(.orange)
+    }
+  }
+
+  @ViewBuilder
+  private var speakerModelStatus: some View {
+    switch controller.speakerModelReadiness {
+    case .notDownloaded:
+      Label("Speaker model not prepared", systemImage: "arrow.down.circle")
+    case .downloading:
+      HStack(spacing: 8) {
+        ProgressView()
+          .controlSize(.small)
+        Text("Preparing speaker model…")
+      }
+    case .ready:
+      Label("Speaker detection ready", systemImage: "checkmark.circle.fill")
+        .foregroundStyle(.green)
+    case .failed(let message):
+      Label("Speaker model: \(message)", systemImage: "exclamationmark.triangle")
         .foregroundStyle(.orange)
     }
   }

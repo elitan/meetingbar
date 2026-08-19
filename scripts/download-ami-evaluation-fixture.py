@@ -12,8 +12,10 @@ from pathlib import Path
 
 
 MEETING_ID = "ES2005a"
-CLIP_START_SECONDS = 78.75
-CLIP_END_SECONDS = 113.20
+TRANSCRIPTION_CLIP_START_SECONDS = 78.75
+TRANSCRIPTION_CLIP_END_SECONDS = 113.20
+DIARIZATION_CLIP_START_SECONDS = 45.0
+DIARIZATION_CLIP_END_SECONDS = 105.0
 ANNOTATIONS_URL = (
     "https://groups.inf.ed.ac.uk/ami/AMICorpusAnnotations/"
     "ami_public_manual_1.6.2.zip"
@@ -43,7 +45,11 @@ def download_if_missing(url: str, destination: Path) -> None:
     urllib.request.urlretrieve(url, destination)
 
 
-def transcript_from_annotations(archive_path: Path) -> str:
+def transcript_from_annotations(
+    archive_path: Path,
+    clip_start_seconds: float,
+    clip_end_seconds: float,
+) -> str:
     words: list[tuple[float, str, str]] = []
     with zipfile.ZipFile(archive_path) as archive:
         for speaker in ("A", "B", "C", "D"):
@@ -56,21 +62,22 @@ def transcript_from_annotations(archive_path: Path) -> str:
                 text = (element.text or "").strip()
                 start = float(element.attrib["starttime"])
                 end = float(element.attrib["endtime"])
-                if text and start >= CLIP_START_SECONDS and end <= CLIP_END_SECONDS:
+                if (
+                    text
+                    and start >= clip_start_seconds
+                    and end <= clip_end_seconds
+                ):
                     words.append((start, speaker, text))
     words.sort()
     return " ".join(text for _, _, text in words)
 
 
-def create_fixture(output: Path, cache: Path) -> None:
-    annotations_path = cache / "meetingbar-ami-manual-1.6.2.zip"
-    source_audio_path = cache / f"meetingbar-ami-{MEETING_ID}.wav"
-    download_if_missing(ANNOTATIONS_URL, annotations_path)
-    download_if_missing(AUDIO_URL, source_audio_path)
-
-    fixture_id = f"{MEETING_ID}-conversation"
-    relative_audio_path = Path("audio") / f"{fixture_id}.wav"
-    destination = output / relative_audio_path
+def extract_audio_clip(
+    source_audio_path: Path,
+    destination: Path,
+    start_seconds: float,
+    end_seconds: float,
+) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(
         [
@@ -80,11 +87,11 @@ def create_fixture(output: Path, cache: Path) -> None:
             "error",
             "-y",
             "-ss",
-            str(CLIP_START_SECONDS),
+            str(start_seconds),
             "-i",
             str(source_audio_path),
             "-t",
-            str(CLIP_END_SECONDS - CLIP_START_SECONDS),
+            str(end_seconds - start_seconds),
             "-ac",
             "1",
             "-ar",
@@ -96,6 +103,29 @@ def create_fixture(output: Path, cache: Path) -> None:
         check=True,
     )
 
+
+def create_fixture(output: Path, cache: Path) -> None:
+    annotations_path = cache / "meetingbar-ami-manual-1.6.2.zip"
+    source_audio_path = cache / f"meetingbar-ami-{MEETING_ID}.wav"
+    download_if_missing(ANNOTATIONS_URL, annotations_path)
+    download_if_missing(AUDIO_URL, source_audio_path)
+
+    fixture_id = f"{MEETING_ID}-conversation"
+    relative_audio_path = Path("audio") / f"{fixture_id}.wav"
+    extract_audio_clip(
+        source_audio_path,
+        output / relative_audio_path,
+        TRANSCRIPTION_CLIP_START_SECONDS,
+        TRANSCRIPTION_CLIP_END_SECONDS,
+    )
+    diarization_id = f"{MEETING_ID}-diarization"
+    extract_audio_clip(
+        source_audio_path,
+        output / "audio" / f"{diarization_id}.wav",
+        DIARIZATION_CLIP_START_SECONDS,
+        DIARIZATION_CLIP_END_SECONDS,
+    )
+
     manifest = {
         "dataset": "AMI Meeting Corpus manual annotations 1.6.2",
         "license": "CC BY 4.0",
@@ -104,7 +134,11 @@ def create_fixture(output: Path, cache: Path) -> None:
                 "id": fixture_id,
                 "language": "en_us",
                 "audioPath": str(relative_audio_path),
-                "reference": transcript_from_annotations(annotations_path),
+                "reference": transcript_from_annotations(
+                    annotations_path,
+                    TRANSCRIPTION_CLIP_START_SECONDS,
+                    TRANSCRIPTION_CLIP_END_SECONDS,
+                ),
                 "maximumWER": 0.15,
             }
         ],
@@ -117,10 +151,11 @@ def create_fixture(output: Path, cache: Path) -> None:
         "AMI Meeting Corpus — AMI Consortium / University of Edinburgh\n"
         "https://groups.inf.ed.ac.uk/ami/corpus/\n"
         "Meeting ES2005a, Mix-Headset audio and manual word annotations\n"
+        "Transcription and turn-taking diarization excerpts\n"
         "License: Creative Commons Attribution 4.0 International\n",
         encoding="utf-8",
     )
-    print(f"Wrote {fixture_id} to {output}")
+    print(f"Wrote {fixture_id} and {diarization_id} to {output}")
 
 
 def main() -> None:

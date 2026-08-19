@@ -1,4 +1,5 @@
 import Foundation
+import SpeakerKit
 import WhisperKit
 import XCTest
 
@@ -161,6 +162,132 @@ final class RealModelIntegrationTests: XCTestCase {
     }
   }
 
+  func testPublicAMIFixtureDetectsMultipleSpeakers() async throws {
+    let environment = ProcessInfo.processInfo.environment
+    guard environment["MEETINGBAR_RUN_SPEAKER_TESTS"] == "1" else {
+      throw XCTSkip("Set MEETINGBAR_RUN_SPEAKER_TESTS=1 to run the public AMI diarization suite.")
+    }
+    guard let audioPath = environment["MEETINGBAR_SPEAKER_AUDIO_PATH"],
+      let downloadBase = environment["MEETINGBAR_SPEAKER_DOWNLOAD_BASE"]
+    else {
+      XCTFail("Set MEETINGBAR_SPEAKER_AUDIO_PATH and MEETINGBAR_SPEAKER_DOWNLOAD_BASE.")
+      return
+    }
+
+    let speakerKit = try await SpeakerKit(
+      PyannoteConfig(
+        downloadBase: downloadBase,
+        download: true,
+        load: false,
+        verbose: false
+      )
+    )
+    let audio = try AudioProcessor.loadAudioAsFloatArray(fromPath: audioPath)
+    let diarization = try await speakerKit.diarize(audioArray: audio)
+
+    print("AMI speakers detected: \(diarization.speakerCount)")
+    for segment in diarization.segments {
+      print(segment)
+    }
+    XCTAssertGreaterThanOrEqual(diarization.speakerCount, 2)
+    XCTAssertLessThanOrEqual(diarization.speakerCount, 4)
+    let openingSpeaker = try XCTUnwrap(
+      diarization.segments.first(where: { $0.startTime <= 10 && $0.endTime >= 10 })?
+        .speaker.speakerId
+    )
+    let closingSpeaker = try XCTUnwrap(
+      diarization.segments.first(where: { $0.startTime <= 45 && $0.endTime >= 45 })?
+        .speaker.speakerId
+    )
+    XCTAssertNotEqual(openingSpeaker, closingSpeaker)
+    let handoffDistance = zip(diarization.segments, diarization.segments.dropFirst())
+      .filter { pair in pair.0.speaker.speakerId != pair.1.speaker.speakerId }
+      .map { pair in abs(Double(pair.0.endTime) - 30.64) }
+      .min()
+    XCTAssertLessThanOrEqual(try XCTUnwrap(handoffDistance), 2)
+    XCTAssertGreaterThan(
+      diarization.segments.reduce(0.0) { duration, segment in
+        duration + Double(segment.endTime - segment.startTime)
+      },
+      20
+    )
+  }
+
+  @MainActor
+  func testPublicAMIFixtureProducesSpeakerPrefixedTranscriptEndToEnd() async throws {
+    let environment = ProcessInfo.processInfo.environment
+    guard environment["MEETINGBAR_RUN_PIPELINE_TESTS"] == "1" else {
+      throw XCTSkip("Set MEETINGBAR_RUN_PIPELINE_TESTS=1 to run the complete public AMI pipeline.")
+    }
+    guard let audioPath = environment["MEETINGBAR_PIPELINE_AUDIO_PATH"],
+      let modelPath = environment["MEETINGBAR_MODEL_PATH"],
+      let modelsRoot = environment["MEETINGBAR_PIPELINE_MODELS_ROOT"]
+    else {
+      XCTFail(
+        "Set MEETINGBAR_PIPELINE_AUDIO_PATH, MEETINGBAR_MODEL_PATH, and MEETINGBAR_PIPELINE_MODELS_ROOT."
+      )
+      return
+    }
+
+    let modelIdentifier =
+      environment["MEETINGBAR_MODEL_IDENTIFIER"]
+      ?? TranscriptionQuality.compact.modelIdentifier
+    let defaultsKey = "WhisperKitModelFolder.\(modelIdentifier)"
+    let previousModelPath = UserDefaults.standard.string(forKey: defaultsKey)
+    UserDefaults.standard.set(modelPath, forKey: defaultsKey)
+    defer {
+      if let previousModelPath {
+        UserDefaults.standard.set(previousModelPath, forKey: defaultsKey)
+      } else {
+        UserDefaults.standard.removeObject(forKey: defaultsKey)
+      }
+    }
+
+    let completion = expectation(description: "Complete transcription with speaker labels")
+    let recorder = PipelineEventRecorder(completion: completion)
+    let queue = TranscriptionQueue(
+      modelsURL: URL(filePath: modelsRoot, directoryHint: .isDirectory)
+    ) { event in
+      recorder.handle(event)
+    }
+    let quality: TranscriptionQuality =
+      modelIdentifier == TranscriptionQuality.compact.modelIdentifier ? .compact : .bestAccuracy
+    await queue.enqueue(
+      TranscriptionJob(
+        recordingID: UUID(),
+        sources: [
+          TranscriptionSource(
+            kind: .microphone,
+            audioURL: URL(filePath: audioPath),
+            offsetSeconds: 0,
+            signal: nil
+          )
+        ],
+        configuration: TranscriptionConfiguration(language: .automatic, quality: quality)
+      )
+    )
+
+    await fulfillment(of: [completion], timeout: 180)
+    if let failure = recorder.failure {
+      XCTFail(failure)
+      return
+    }
+    let transcript = try XCTUnwrap(recorder.transcript)
+    let speakerLabels = Set(
+      transcript.split(separator: "\n").compactMap { rawLine -> String? in
+        let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard line.hasPrefix("Speaker "), let colon = line.firstIndex(of: ":") else {
+          return nil
+        }
+        return String(line[..<colon])
+      }
+    )
+    print("End-to-end speaker transcript:\n\(transcript)")
+    XCTAssertGreaterThanOrEqual(speakerLabels.count, 2)
+    XCTAssertTrue(recorder.warnings.isEmpty)
+    XCTAssertEqual(recorder.language, "en")
+  }
+
   private func languagePreference(
     for language: String
   ) -> TranscriptionLanguagePreference {
@@ -182,6 +309,34 @@ final class RealModelIntegrationTests: XCTestCase {
       0.08
     default:
       nil
+    }
+  }
+}
+
+@MainActor
+private final class PipelineEventRecorder {
+  private let completion: XCTestExpectation
+  private(set) var transcript: String?
+  private(set) var language: String?
+  private(set) var warnings: [String] = []
+  private(set) var failure: String?
+
+  init(completion: XCTestExpectation) {
+    self.completion = completion
+  }
+
+  func handle(_ event: TranscriptionQueueEvent) {
+    switch event {
+    case .completed(_, let transcript, let language, _, let warnings):
+      self.transcript = transcript
+      self.language = language
+      self.warnings = warnings
+      completion.fulfill()
+    case .failed(_, let message):
+      failure = message
+      completion.fulfill()
+    default:
+      break
     }
   }
 }
