@@ -1,8 +1,12 @@
 MeetingBar third-party notices
 
-WhisperKit / argmax-oss-swift 1.1.0
+WhisperKit and SpeakerKit / argmax-oss-swift 1.1.0
 Copyright (c) 2024 argmax, inc.
 https://github.com/argmaxinc/argmax-oss-swift
+
+SpeakerKit model weights
+https://huggingface.co/argmaxinc/speakerkit-coreml
+Based on Pyannote Community-1, licensed under CC BY 4.0
 
 KeyboardShortcuts 3.0.1
 Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)

@@ -3,8 +3,9 @@
 MeetingBar directly depends on:
 
 - [KeyboardShortcuts 3.0.1](https://github.com/sindresorhus/KeyboardShortcuts), copyright Sindre Sorhus, MIT License.
-- [WhisperKit 1.1.0](https://github.com/argmaxinc/argmax-oss-swift), copyright Argmax, Inc., MIT License.
+- [WhisperKit and SpeakerKit 1.1.0](https://github.com/argmaxinc/argmax-oss-swift), copyright Argmax, Inc., MIT License.
 - Whisper model weights downloaded by WhisperKit. Their applicable license is included with the downloaded model repository.
+- SpeakerKit Core ML model weights downloaded from [argmaxinc/speakerkit-coreml](https://huggingface.co/argmaxinc/speakerkit-coreml). The underlying Pyannote Community-1 pipeline is distributed under CC BY 4.0.
 
 OpenSuperWhisper, Mila, and Parrot were reviewed only as architectural references. MeetingBar does not include their source code.
 

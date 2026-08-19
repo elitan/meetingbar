@@ -65,7 +65,7 @@ struct OnboardingView: View {
         }
       }
 
-      setupRow(number: 3, title: "On-device transcription model") {
+      setupRow(number: 3, title: "On-device transcription and speaker models") {
         VStack(alignment: .leading, spacing: 10) {
           Picker(
             "Meeting language",
@@ -93,7 +93,9 @@ struct OnboardingView: View {
           HStack {
             modelSetupStatus
             Spacer()
-            if controller.modelReadiness != .ready {
+            if controller.modelReadiness != .ready
+              || controller.speakerModelReadiness != .ready
+            {
               Button("Download and Prepare") {
                 Task {
                   await controller.prepareModel()
@@ -194,6 +196,14 @@ struct OnboardingView: View {
 
   @ViewBuilder
   private var modelSetupStatus: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      transcriptionModelSetupStatus
+      speakerModelSetupStatus
+    }
+  }
+
+  @ViewBuilder
+  private var transcriptionModelSetupStatus: some View {
     switch controller.modelReadiness {
     case .notDownloaded:
       Text(controller.transcriptionPreferences.quality.detail)
@@ -206,10 +216,32 @@ struct OnboardingView: View {
           .font(.caption)
       }
     case .ready:
-      Label("Model ready", systemImage: "checkmark.circle.fill")
+      Label("Speech model ready", systemImage: "checkmark.circle.fill")
         .foregroundStyle(.green)
     case .failed(let message):
       Text(message)
+        .foregroundStyle(.orange)
+        .lineLimit(2)
+    }
+  }
+
+  @ViewBuilder
+  private var speakerModelSetupStatus: some View {
+    switch controller.speakerModelReadiness {
+    case .notDownloaded:
+      Text("The speaker model will also be prepared on this Mac.")
+        .foregroundStyle(.secondary)
+    case .downloading:
+      HStack(spacing: 8) {
+        ProgressView()
+          .controlSize(.small)
+        Text("Preparing speaker model…")
+      }
+    case .ready:
+      Label("Speaker model ready", systemImage: "checkmark.circle.fill")
+        .foregroundStyle(.green)
+    case .failed(let message):
+      Text("Speaker model: \(message)")
         .foregroundStyle(.orange)
         .lineLimit(2)
     }

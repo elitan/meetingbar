@@ -15,6 +15,7 @@ enum ModelReadiness: Equatable, Sendable {
 @Observable
 final class AppController {
   private(set) var modelReadiness: ModelReadiness = .notDownloaded
+  private(set) var speakerModelReadiness: ModelReadiness = .notDownloaded
   private(set) var lastErrorMessage: String?
   private(set) var launchAtLoginEnabled = false
   private(set) var didFinishLaunchRecovery = false
@@ -371,6 +372,12 @@ final class AppController {
       if modelIdentifier == transcriptionPreferences.quality.modelIdentifier {
         modelReadiness = .ready
       }
+    case .speakerModelPreparing:
+      speakerModelReadiness = .downloading(0)
+    case .speakerModelReady:
+      speakerModelReadiness = .ready
+    case .speakerModelFailed(let message):
+      speakerModelReadiness = .failed(message)
     case .started(let id):
       guard let recording = recording(id: id) else {
         return
@@ -378,13 +385,19 @@ final class AppController {
       recording.status = .transcribing
       recording.errorMessage = nil
       save(recording)
-    case .completed(let id, let transcript, let language, let modelIdentifier):
+    case .completed(let id, let transcript, let language, let modelIdentifier, let warnings):
       guard let recording = recording(id: id) else {
         return
       }
       recording.transcript = transcript
       recording.detectedLanguage = language
       recording.modelIdentifier = modelIdentifier
+      recording.captureWarnings.removeAll {
+        $0.hasPrefix("Speaker detection was unavailable for ")
+      }
+      for warning in warnings where !recording.captureWarnings.contains(warning) {
+        recording.captureWarnings.append(warning)
+      }
       recording.status = .ready
       recording.errorMessage = nil
       save(recording)
