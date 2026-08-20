@@ -24,6 +24,10 @@ The first launch walks through recording consent, permissions, the on-device mod
 
 Microphones can be selected directly from the menu-bar menu and ordered in Settings. MeetingBar persists each device by its macOS unique identifier, uses the first connected microphone in the priority list, falls back when it disappears, and automatically returns to a higher-priority device when it reconnects. Devices remain remembered while disconnected until explicitly forgotten.
 
+Online meeting reminders are enabled by default. MeetingBar reads Core Audio process metadata to notice when native Zoom, Microsoft Teams, or a common browser has continuously used microphone input for 1.5 seconds. It then shows a small floating MeetingBar banner with **Start Recording** and **Not Now** actions. The banner appears across Spaces without activating MeetingBar or requiring Notification Center permission. The same application is not prompted again until its microphone input has been inactive for 30 seconds. Detection never opens or listens to the microphone; audio capture begins only after **Start Recording** is chosen.
+
+Browser reminders cover calls such as Google Meet, Zoom Web, and Teams Web, but macOS identifies the browser rather than the active tab. A non-meeting website using the microphone can therefore trigger the same reminder. Native-app and browser reminders can be configured separately in Settings. No calendar account or calendar permission is used.
+
 Settings also provides:
 
 - Automatic, Swedish, or English language selection. Automatic is the default and is recommended unless detection chooses the wrong language.
@@ -96,7 +100,7 @@ scripts/run-pipeline-benchmark.sh \
 
 ## Testing calls
 
-The automated tests cover the capture state machine, hotkey debouncing, microphone priority persistence and reconnect fallback, mixer alignment/silence/clipping, partial WAV repair, queue recovery, and retention boundaries. Before relying on the app, manually test the permission and hardware scenarios in the product plan, including Zoom, Teams, a browser call, headphones, speakers, device changes, sleep/wake, and force-quit recovery.
+The automated tests cover the capture state machine, hotkey debouncing, microphone priority persistence and reconnect fallback, online-meeting application matching and reminder debouncing, mixer alignment/silence/clipping, partial WAV repair, queue recovery, and retention boundaries. Before relying on the app, manually test the permission and hardware scenarios in the product plan, including Zoom, Teams, a browser call, headphones, speakers, device changes, sleep/wake, and force-quit recovery.
 
 Run the fast suite with:
 

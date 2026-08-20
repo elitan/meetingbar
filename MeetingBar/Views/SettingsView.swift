@@ -50,6 +50,48 @@ struct SettingsView: View {
         .foregroundStyle(.secondary)
       }
 
+      Section("Online meeting reminders") {
+        Toggle(
+          "Prompt when an online meeting uses the microphone",
+          isOn: Binding(
+            get: { controller.meetingReminderPreferences.isEnabled },
+            set: { controller.setMeetingRemindersEnabled($0) }
+          )
+        )
+
+        Toggle(
+          "Include browser microphone activity",
+          isOn: Binding(
+            get: { controller.meetingReminderPreferences.includesBrowsers },
+            set: { controller.setMeetingRemindersIncludeBrowsers($0) }
+          )
+        )
+        .disabled(!controller.meetingReminderPreferences.isEnabled)
+
+        Text(
+          "MeetingBar watches macOS process metadata for Zoom, Microsoft Teams, and common browsers. It does not open or listen to the microphone until you choose Start Recording. Browser reminders can include non-meeting sites that use the microphone."
+        )
+        .font(.caption)
+        .foregroundStyle(.secondary)
+
+        if controller.meetingReminderPreferences.isEnabled {
+          Label(
+            "Ready — no Notification Center permission required",
+            systemImage: "checkmark.circle.fill"
+          )
+          .foregroundStyle(.green)
+
+          Button("Show Test Reminder") {
+            controller.showTestMeetingReminder()
+          }
+
+          if let message = controller.meetingReminderMonitorError {
+            Label(message, systemImage: "exclamationmark.triangle")
+              .foregroundStyle(.orange)
+          }
+        }
+      }
+
       Section("Permissions") {
         permissionRow(
           title: "Microphone",

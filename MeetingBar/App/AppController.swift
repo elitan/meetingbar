@@ -19,18 +19,21 @@ final class AppController {
   private(set) var lastErrorMessage: String?
   private(set) var launchAtLoginEnabled = false
   private(set) var didFinishLaunchRecovery = false
+  private(set) var meetingReminderMonitorError: String?
 
   let capture: AudioCaptureController
   let fileStore: RecordingFileStore
+  let meetingReminderPreferences: MeetingReminderPreferenceStore
   let microphonePreferences: MicrophonePreferenceStore
   let transcriptionPreferences: TranscriptionPreferenceStore
 
   private let modelContext: ModelContext
   private let retentionService: RetentionService
   private let recoveryService: RecordingRecoveryService
-  private let notificationService = NotificationService()
+  private let bannerPresenter = AppBannerPresenter()
   private let loginItemService = LoginItemService()
   private var transcriptionQueue: TranscriptionQueue!
+  private var onlineMeetingMonitor: OnlineMeetingMonitor!
   private var activeRecordingID: UUID?
   private var retentionTask: Task<Void, Never>?
   private var hasLaunched = false
@@ -44,6 +47,7 @@ final class AppController {
     self.fileStore = fileStore
     let microphonePreferences = MicrophonePreferenceStore()
     self.microphonePreferences = microphonePreferences
+    meetingReminderPreferences = MeetingReminderPreferenceStore()
     transcriptionPreferences = TranscriptionPreferenceStore()
     capture = AudioCaptureController(
       fileStore: fileStore,
@@ -54,7 +58,15 @@ final class AppController {
     transcriptionQueue = TranscriptionQueue(modelsURL: fileStore.modelsURL) { [weak self] event in
       self?.handleTranscriptionEvent(event)
     }
-
+    onlineMeetingMonitor = OnlineMeetingMonitor(
+      includesBrowsers: meetingReminderPreferences.includesBrowsers
+    )
+    onlineMeetingMonitor.onMeetingDetected = { [weak self] application in
+      self?.handleOnlineMeetingDetected(application)
+    }
+    onlineMeetingMonitor.onErrorChanged = { [weak self] message in
+      self?.meetingReminderMonitorError = message
+    }
     capture.onWarning = { [weak self] warning in
       self?.recordCaptureWarning(warning)
     }
@@ -108,6 +120,10 @@ final class AppController {
       lastErrorMessage = "Meeting recovery could not finish: \(error.localizedDescription)"
     }
 
+    if onboardingComplete && meetingReminderPreferences.isEnabled {
+      onlineMeetingMonitor.start()
+    }
+
     retentionTask = Task { [weak self] in
       while !Task.isCancelled {
         try? await Task.sleep(for: .seconds(86_400))
@@ -153,10 +169,6 @@ final class AppController {
     AudioCaptureController.requestScreenPermission()
   }
 
-  func requestNotificationPermission() async -> Bool {
-    await notificationService.requestAuthorization()
-  }
-
   func setLaunchAtLogin(_ enabled: Bool) -> Bool {
     do {
       try loginItemService.setEnabled(enabled)
@@ -171,6 +183,35 @@ final class AppController {
 
   func completeOnboarding() {
     UserDefaults.standard.set(true, forKey: "DidCompleteOnboarding")
+    if meetingReminderPreferences.isEnabled {
+      onlineMeetingMonitor.start()
+    }
+  }
+
+  func setMeetingRemindersEnabled(_ enabled: Bool) {
+    meetingReminderPreferences.setEnabled(enabled)
+    if enabled && onboardingComplete {
+      meetingReminderMonitorError = nil
+      onlineMeetingMonitor.start()
+    } else {
+      onlineMeetingMonitor.stop()
+      meetingReminderMonitorError = nil
+      bannerPresenter.dismiss()
+    }
+  }
+
+  func setMeetingRemindersIncludeBrowsers(_ includesBrowsers: Bool) {
+    meetingReminderPreferences.setIncludesBrowsers(includesBrowsers)
+    onlineMeetingMonitor.setIncludesBrowsers(includesBrowsers)
+    bannerPresenter.dismiss()
+  }
+
+  func showTestMeetingReminder() {
+    guard capture.state == .idle else {
+      lastErrorMessage = "Stop the current recording before testing a meeting reminder."
+      return
+    }
+    presentMeetingReminder(applicationName: "Test meeting")
   }
 
   func prioritizeMicrophone(_ microphoneID: String) {
@@ -268,6 +309,8 @@ final class AppController {
   }
 
   func quit() async {
+    onlineMeetingMonitor.stop()
+    bannerPresenter.dismiss()
     if capture.state.isRecording {
       await stopRecording()
     }
@@ -280,6 +323,7 @@ final class AppController {
 
   private func startRecording() async {
     lastErrorMessage = nil
+    bannerPresenter.dismiss()
     let now = Date.now
     let recording = Recording(
       title: "Meeting \(now.formatted(.dateTime.year().month().day().hour().minute()))",
@@ -301,6 +345,32 @@ final class AppController {
       modelContext.delete(recording)
       try? modelContext.save()
       lastErrorMessage = error.localizedDescription
+    }
+  }
+
+  private func startRecordingFromReminder() async {
+    guard capture.state == .idle else {
+      return
+    }
+    await startRecording()
+  }
+
+  private func handleOnlineMeetingDetected(_ application: OnlineMeetingApplication) {
+    meetingReminderMonitorError = nil
+    guard meetingReminderPreferences.isEnabled, capture.state == .idle else {
+      return
+    }
+    presentMeetingReminder(applicationName: application.name)
+  }
+
+  private func presentMeetingReminder(applicationName: String) {
+    bannerPresenter.presentMeetingReminder(applicationName: applicationName) { [weak self] in
+      guard let self else {
+        return
+      }
+      Task { @MainActor in
+        await self.startRecordingFromReminder()
+      }
     }
   }
 
@@ -401,10 +471,7 @@ final class AppController {
       recording.status = .ready
       recording.errorMessage = nil
       save(recording)
-      let title = recording.title
-      Task {
-        await notificationService.notifyTranscriptionReady(title: title)
-      }
+      bannerPresenter.presentInformation(title: "Transcript ready", body: recording.title)
     case .failed(let id, let message):
       guard let recording = recording(id: id) else {
         return
@@ -412,10 +479,11 @@ final class AppController {
       recording.status = .failed
       recording.errorMessage = message
       save(recording)
-      let title = recording.title
-      Task {
-        await notificationService.notifyTranscriptionFailed(title: title)
-      }
+      bannerPresenter.presentInformation(
+        title: "Transcription failed",
+        body: "Open MeetingBar to retry \(recording.title).",
+        isError: true
+      )
     }
   }
 
