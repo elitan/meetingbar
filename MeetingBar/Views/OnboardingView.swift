@@ -106,11 +106,31 @@ struct OnboardingView: View {
         }
       }
 
-      setupRow(number: 4, title: "Shortcut and startup") {
+      setupRow(number: 4, title: "Shortcut, reminders, and startup") {
         VStack(alignment: .leading, spacing: 10) {
           LabeledContent("Toggle recording") {
             MeetingShortcutRecorder()
           }
+          Toggle(
+            "Remind me when an online meeting uses the microphone",
+            isOn: Binding(
+              get: { controller.meetingReminderPreferences.isEnabled },
+              set: { controller.setMeetingRemindersEnabled($0) }
+            )
+          )
+          Toggle(
+            "Include browser calls such as Google Meet",
+            isOn: Binding(
+              get: { controller.meetingReminderPreferences.includesBrowsers },
+              set: { controller.setMeetingRemindersIncludeBrowsers($0) }
+            )
+          )
+          .disabled(!controller.meetingReminderPreferences.isEnabled)
+          Text(
+            "Meeting reminders inspect which app is using the microphone, never its audio. Recording only starts after you choose Start Recording in the MeetingBar banner."
+          )
+          .font(.caption)
+          .foregroundStyle(.secondary)
           Toggle("Launch MeetingBar at login", isOn: $launchAtLogin)
         }
       }
@@ -124,9 +144,6 @@ struct OnboardingView: View {
         Spacer()
         Button("Finish Setup") {
           _ = controller.setLaunchAtLogin(launchAtLogin)
-          Task {
-            _ = await controller.requestNotificationPermission()
-          }
           controller.completeOnboarding()
           dismissWindow(id: "onboarding")
         }
