@@ -159,14 +159,26 @@ final class OnlineMeetingReminderTests: XCTestCase {
     _ = try CoreAudioInputProcessProvider().activeInputProcesses()
   }
 
-  func testBannerPositionUsesVisibleFrameOnCurrentDisplay() {
+  func testInformationalBannerPositionUsesTopTrailingVisibleFrame() {
     let origin = AppBannerPosition.origin(
       panelSize: CGSize(width: 380, height: 148),
-      visibleFrame: CGRect(x: 1_728, y: 23, width: 1_920, height: 1_057)
+      visibleFrame: CGRect(x: 1_728, y: 23, width: 1_920, height: 1_057),
+      placement: .topTrailing
     )
 
     XCTAssertEqual(origin.x, 3_252)
     XCTAssertEqual(origin.y, 916)
+  }
+
+  func testMeetingReminderPositionUsesCenterOfVisibleFrame() {
+    let origin = AppBannerPosition.origin(
+      panelSize: CGSize(width: 380, height: 148),
+      visibleFrame: CGRect(x: 1_728, y: 23, width: 1_920, height: 1_057),
+      placement: .center
+    )
+
+    XCTAssertEqual(origin.x, 2_498)
+    XCTAssertEqual(origin.y, 477.5)
   }
 
   private func application(bundleID: String) -> OnlineMeetingApplication? {

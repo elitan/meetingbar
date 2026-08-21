@@ -23,6 +23,7 @@ final class AppBannerPresenter {
       symbolName: "waveform.circle.fill",
       primaryActionTitle: "Start Recording",
       priority: .meetingReminder,
+      placement: .center,
       duration: .seconds(30),
       onPrimaryAction: onStartRecording
     )
@@ -35,6 +36,7 @@ final class AppBannerPresenter {
       symbolName: isError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill",
       primaryActionTitle: nil,
       priority: .information,
+      placement: .topTrailing,
       duration: .seconds(10),
       onPrimaryAction: nil
     )
@@ -55,6 +57,7 @@ final class AppBannerPresenter {
     symbolName: String,
     primaryActionTitle: String?,
     priority: Priority,
+    placement: AppBannerPlacement,
     duration: Duration,
     onPrimaryAction: (() -> Void)?
   ) {
@@ -113,7 +116,8 @@ final class AppBannerPresenter {
       panel.setFrameOrigin(
         AppBannerPosition.origin(
           panelSize: panelSize,
-          visibleFrame: visibleFrame
+          visibleFrame: visibleFrame,
+          placement: placement
         )
       )
     }
@@ -131,16 +135,30 @@ final class AppBannerPresenter {
   }
 }
 
+enum AppBannerPlacement {
+  case center
+  case topTrailing
+}
+
 enum AppBannerPosition {
   static func origin(
     panelSize: CGSize,
     visibleFrame: CGRect,
+    placement: AppBannerPlacement,
     margin: CGFloat = 16
   ) -> CGPoint {
-    CGPoint(
-      x: visibleFrame.maxX - panelSize.width - margin,
-      y: visibleFrame.maxY - panelSize.height - margin
-    )
+    switch placement {
+    case .center:
+      CGPoint(
+        x: visibleFrame.midX - panelSize.width / 2,
+        y: visibleFrame.midY - panelSize.height / 2
+      )
+    case .topTrailing:
+      CGPoint(
+        x: visibleFrame.maxX - panelSize.width - margin,
+        y: visibleFrame.maxY - panelSize.height - margin
+      )
+    }
   }
 }
 
