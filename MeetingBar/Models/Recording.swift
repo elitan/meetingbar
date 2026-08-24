@@ -21,10 +21,17 @@ enum RecordingStatus: String, Codable, CaseIterable, Sendable {
   }
 }
 
+enum RecordingTitleOrigin: String, Codable, Sendable {
+  case placeholder
+  case generated
+  case manual
+}
+
 @Model
 final class Recording {
   @Attribute(.unique) var id: UUID
   var title: String
+  var titleOriginRawValue: String = RecordingTitleOrigin.manual.rawValue
   var isPinned: Bool = false
   var startedAt: Date
   var endedAt: Date?
@@ -45,6 +52,7 @@ final class Recording {
   init(
     id: UUID = UUID(),
     title: String,
+    titleOrigin: RecordingTitleOrigin = .manual,
     isPinned: Bool = false,
     startedAt: Date = .now,
     endedAt: Date? = nil,
@@ -64,6 +72,7 @@ final class Recording {
   ) {
     self.id = id
     self.title = title
+    self.titleOriginRawValue = titleOrigin.rawValue
     self.isPinned = isPinned
     self.startedAt = startedAt
     self.endedAt = endedAt
@@ -88,6 +97,37 @@ final class Recording {
       statusRawValue = newValue.rawValue
       updatedAt = .now
     }
+  }
+
+  var titleOrigin: RecordingTitleOrigin {
+    get { RecordingTitleOrigin(rawValue: titleOriginRawValue) ?? .manual }
+    set {
+      titleOriginRawValue = newValue.rawValue
+      updatedAt = .now
+    }
+  }
+
+  var needsGeneratedTitle: Bool {
+    titleOrigin == .placeholder
+      && status == .ready
+      && !transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+  }
+
+  func setManualTitle(_ title: String) {
+    self.title = title
+    titleOrigin = .manual
+    updatedAt = .now
+  }
+
+  @discardableResult
+  func applyGeneratedTitle(_ title: String, for sourceTranscript: String) -> Bool {
+    guard needsGeneratedTitle, transcript == sourceTranscript else {
+      return false
+    }
+    self.title = title
+    titleOrigin = .generated
+    updatedAt = .now
+    return true
   }
 
   var isCapturing: Bool {

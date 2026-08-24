@@ -1,8 +1,8 @@
 # MeetingBar
 
-MeetingBar is a private, native macOS menu-bar recorder for in-person meetings and calls. It captures your preferred available microphone and system audio, transcribes entirely on-device with WhisperKit, detects speakers on-device with SpeakerKit, and keeps a searchable local transcript library.
+MeetingBar is a private, native macOS menu-bar recorder for in-person meetings and calls. It captures your preferred available microphone and system audio, transcribes entirely on-device with WhisperKit, detects speakers on-device with SpeakerKit, and keeps a searchable local transcript library. After transcription, Apple's on-device system language model turns the date placeholder into a short grounded meeting title when the model is available.
 
-Important meetings can be pinned above the chronological library, and titles can be renamed directly in the left list by double-clicking or using the context menu. When multiple speakers are detected, transcripts are split into turns prefixed with `Speaker 0`, `Speaker 1`, and so on. Single-speaker transcripts remain plain text. Speaker numbers are local to each meeting and assigned by first appearance.
+Important meetings can be pinned above the chronological library, and titles can be renamed directly in the left list by double-clicking or using the context menu. A manual title is never replaced by a generated one. When multiple speakers are detected, transcripts are split into turns prefixed with `Speaker 0`, `Speaker 1`, and so on. Single-speaker transcripts remain plain text. Speaker numbers are local to each meeting and assigned by first appearance.
 
 Audio plays directly inside MeetingBar. Playback measures and balances the retained microphone and system tracks independently for every recording, regardless of the connected device, then applies a soft limiter without changing either source file. Transcription uses the same timestamp-aligned tracks so each side can be normalized and recognized independently before the transcript is merged. This avoids volume loss and speaker masking from relying only on the raw mix.
 
@@ -112,3 +112,9 @@ xcodebuild test \
 ```
 
 The opt-in real-model suite uses the same normalization, incremental VAD loading, activity filtering, and transcript normalization as the app. Generated fixtures and all personal recordings remain local.
+
+Run the real Swedish and English on-device title smoke test with:
+
+```sh
+scripts/run-title-benchmark.sh
+```

@@ -15,6 +15,7 @@ enum TranscriptionQueueEvent: Sendable {
   case speakerModelReady
   case speakerModelFailed(String)
   case started(UUID)
+  case idle
   case completed(
     recordingID: UUID,
     transcript: String,
@@ -154,6 +155,8 @@ actor TranscriptionQueue {
     processingTask = nil
     if !pendingJobs.isEmpty {
       beginProcessingIfNeeded()
+    } else {
+      await eventHandler(.idle)
     }
   }
 

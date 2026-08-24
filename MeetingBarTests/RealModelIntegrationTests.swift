@@ -1,4 +1,5 @@
 import Foundation
+import FoundationModels
 import SpeakerKit
 import WhisperKit
 import XCTest
@@ -286,6 +287,48 @@ final class RealModelIntegrationTests: XCTestCase {
     XCTAssertGreaterThanOrEqual(speakerLabels.count, 2)
     XCTAssertTrue(recorder.warnings.isEmpty)
     XCTAssertEqual(recorder.language, "en")
+  }
+
+  func testSystemModelGeneratesGroundedSwedishAndEnglishTitles() async throws {
+    let environment = ProcessInfo.processInfo.environment
+    guard environment["MEETINGBAR_RUN_TITLE_TESTS"] == "1" else {
+      throw XCTSkip("Set MEETINGBAR_RUN_TITLE_TESTS=1 to run the on-device title suite.")
+    }
+    guard case .available = SystemLanguageModel.default.availability else {
+      throw XCTSkip("The on-device system language model is unavailable on this Mac.")
+    }
+
+    let fixtures = [
+      (
+        language: "sv",
+        transcript:
+          "Vi gick igenom nästa version av MeetingBar och bestämde att biblioteket ska få automatiska korta titlar. Titlarna ska skapas lokalt efter transkriberingen och manuella namn får aldrig skrivas över."
+      ),
+      (
+        language: "en",
+        transcript:
+          "We reviewed the MeetingBar library and agreed to add short automatic titles after transcription. Everything should run locally, and a title typed by the user must never be overwritten."
+      ),
+    ]
+
+    for fixture in fixtures {
+      let clock = ContinuousClock()
+      let startedAt = clock.now
+      let title = await MeetingTitleGenerator.generateTitle(
+        transcript: fixture.transcript,
+        detectedLanguage: fixture.language
+      )
+      let elapsed = startedAt.duration(to: clock.now)
+      let generatedTitle = try XCTUnwrap(title)
+      print("Generated title [\(fixture.language)] in \(elapsed): \(generatedTitle)")
+      XCTAssertLessThanOrEqual(generatedTitle.count, MeetingTitleGenerator.maximumTitleCharacters)
+      XCTAssertLessThanOrEqual(
+        generatedTitle.split(separator: " ").count,
+        MeetingTitleGenerator.maximumTitleWords
+      )
+      XCTAssertFalse(generatedTitle.contains("\n"))
+      XCTAssertLessThan(elapsed, .seconds(10))
+    }
   }
 
   private func languagePreference(

@@ -32,6 +32,7 @@ final class AppController {
   private let recoveryService: RecordingRecoveryService
   private let bannerPresenter = AppBannerPresenter()
   private let loginItemService = LoginItemService()
+  private var meetingTitleQueue: MeetingTitleQueue!
   private var transcriptionQueue: TranscriptionQueue!
   private var onlineMeetingMonitor: OnlineMeetingMonitor!
   private var activeRecordingID: UUID?
@@ -57,6 +58,9 @@ final class AppController {
     recoveryService = RecordingRecoveryService(modelContext: modelContext, fileStore: fileStore)
     transcriptionQueue = TranscriptionQueue(modelsURL: fileStore.modelsURL) { [weak self] event in
       self?.handleTranscriptionEvent(event)
+    }
+    meetingTitleQueue = MeetingTitleQueue { [weak self] event in
+      self?.handleMeetingTitleEvent(event)
     }
     onlineMeetingMonitor = OnlineMeetingMonitor(
       includesBrowsers: meetingReminderPreferences.includesBrowsers
@@ -107,8 +111,25 @@ final class AppController {
 
       let recordings = try modelContext.fetch(FetchDescriptor<Recording>())
       let queued = recordings.filter { $0.status == .queued && $0.audioRelativePath != nil }
-      for recording in recovered + queued where recording.audioRelativePath != nil {
-        enqueue(recording)
+      let pendingTranscriptions = recovered + queued
+      for recording in pendingTranscriptions {
+        guard let relativePath = recording.audioRelativePath else {
+          continue
+        }
+        await transcriptionQueue.enqueue(
+          makeTranscriptionJob(
+            recordingID: recording.id,
+            fallbackAudioURL: fileStore.resolve(relativePath: relativePath)
+          )
+        )
+      }
+      for recording in recordings {
+        if let titleJob = MeetingTitleJob(recording: recording) {
+          await meetingTitleQueue.enqueue(titleJob)
+        }
+      }
+      if pendingTranscriptions.isEmpty {
+        await meetingTitleQueue.resumeProcessing()
       }
       didFinishLaunchRecovery = true
       if onboardingComplete {
@@ -258,6 +279,15 @@ final class AppController {
     }
   }
 
+  func rename(_ recording: Recording, to title: String) {
+    let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmedTitle.isEmpty else {
+      return
+    }
+    recording.setManualTitle(trimmedTitle)
+    save(recording)
+  }
+
   func retry(_ recording: Recording) {
     guard let relativePath = recording.audioRelativePath else {
       lastErrorMessage = "The source audio has already been deleted."
@@ -327,6 +357,7 @@ final class AppController {
     let now = Date.now
     let recording = Recording(
       title: "Meeting \(now.formatted(.dateTime.year().month().day().hour().minute()))",
+      titleOrigin: .placeholder,
       startedAt: now
     )
     modelContext.insert(recording)
@@ -449,12 +480,19 @@ final class AppController {
     case .speakerModelFailed(let message):
       speakerModelReadiness = .failed(message)
     case .started(let id):
+      Task {
+        await meetingTitleQueue.pauseProcessing()
+      }
       guard let recording = recording(id: id) else {
         return
       }
       recording.status = .transcribing
       recording.errorMessage = nil
       save(recording)
+    case .idle:
+      Task {
+        await meetingTitleQueue.resumeProcessing()
+      }
     case .completed(let id, let transcript, let language, let modelIdentifier, let warnings):
       guard let recording = recording(id: id) else {
         return
@@ -471,6 +509,7 @@ final class AppController {
       recording.status = .ready
       recording.errorMessage = nil
       save(recording)
+      enqueueTitle(for: recording)
       bannerPresenter.presentInformation(title: "Transcript ready", body: recording.title)
     case .failed(let id, let message):
       guard let recording = recording(id: id) else {
@@ -484,6 +523,28 @@ final class AppController {
         body: "Open MeetingBar to retry \(recording.title).",
         isError: true
       )
+    }
+  }
+
+  private func enqueueTitle(for recording: Recording) {
+    guard let job = MeetingTitleJob(recording: recording) else {
+      return
+    }
+    Task {
+      await meetingTitleQueue.enqueue(job)
+    }
+  }
+
+  private func handleMeetingTitleEvent(_ event: MeetingTitleQueueEvent) {
+    switch event {
+    case .completed(let id, let sourceTranscript, let title):
+      guard let recording = recording(id: id) else {
+        return
+      }
+      guard recording.applyGeneratedTitle(title, for: sourceTranscript) else {
+        return
+      }
+      save(recording)
     }
   }
 

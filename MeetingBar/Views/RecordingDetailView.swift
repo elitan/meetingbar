@@ -14,7 +14,13 @@ struct RecordingDetailView: View {
     ScrollView {
       VStack(alignment: .leading, spacing: 20) {
         HStack(spacing: 12) {
-          TextField("Meeting title", text: $recording.title)
+          TextField(
+            "Meeting title",
+            text: Binding(
+              get: { recording.title },
+              set: { recording.setManualTitle($0) }
+            )
+          )
             .font(.title2.weight(.semibold))
             .textFieldStyle(.plain)
             .onSubmit {

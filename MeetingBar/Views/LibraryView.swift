@@ -177,8 +177,7 @@ private struct RecordingRow: View {
     }
     let title = draftTitle.trimmingCharacters(in: .whitespacesAndNewlines)
     if !title.isEmpty, title != recording.title {
-      recording.title = title
-      controller.save(recording)
+      controller.rename(recording, to: title)
     }
     isRenaming = false
     isTitleFocused = false
