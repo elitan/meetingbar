@@ -76,14 +76,17 @@ final class AppController {
     UserDefaults.standard.bool(forKey: "DidCompleteOnboarding")
   }
 
-  init(modelContext: ModelContext, fileStore: RecordingFileStore) {
+  init(
+    modelContext: ModelContext,
+    fileStore: RecordingFileStore,
+    transcriptionSecretStore: any TranscriptionSecretStoring = KeychainTranscriptionSecretStore()
+  ) {
     self.modelContext = modelContext
     self.fileStore = fileStore
     let microphonePreferences = MicrophonePreferenceStore()
     self.microphonePreferences = microphonePreferences
     meetingReminderPreferences = MeetingReminderPreferenceStore()
     recordingSafetyPreferences = RecordingSafetyPreferenceStore()
-    let transcriptionSecretStore = KeychainTranscriptionSecretStore()
     transcriptionPreferences = TranscriptionPreferenceStore(secretStore: transcriptionSecretStore)
     capture = AudioCaptureController(
       fileStore: fileStore,
@@ -210,6 +213,11 @@ final class AppController {
         configuration: transcriptionPreferences.configuration
       )
     } catch {
+      if let transcriptionError = error as? ElevenLabsTranscriptionError,
+        case .missingAPIKey = transcriptionError
+      {
+        transcriptionPreferences.markElevenLabsAPIKeyUnavailable()
+      }
       modelReadiness = .failed(error.localizedDescription)
       lastErrorMessage = error.localizedDescription
     }

@@ -20,6 +20,24 @@ final class TranscriptionPreferenceStoreTests: XCTestCase {
     XCTAssertFalse(store.hasElevenLabsAPIKey)
   }
 
+  func testInitializationNeverReadsKeychainBeforeTheAppIsReady() {
+    let fixture = makeDefaults()
+    defer { fixture.defaults.removePersistentDomain(forName: fixture.suiteName) }
+    fixture.defaults.set(
+      TranscriptionProvider.elevenLabs.rawValue,
+      forKey: "TranscriptionProvider"
+    )
+    let secrets = TranscriptionSecretStoreSpy()
+
+    let store = TranscriptionPreferenceStore(
+      userDefaults: fixture.defaults,
+      secretStore: secrets
+    )
+
+    XCTAssertTrue(store.hasElevenLabsAPIKey)
+    XCTAssertEqual(secrets.readCount, 0)
+  }
+
   func testProviderLanguageAndModelsPersistAcrossRelaunch() {
     let fixture = makeDefaults()
     defer { fixture.defaults.removePersistentDomain(forName: fixture.suiteName) }
@@ -118,4 +136,26 @@ private final class InMemoryTranscriptionSecretStore: TranscriptionSecretStoring
       secrets.removeValue(forKey: provider)
     }
   }
+}
+
+private final class TranscriptionSecretStoreSpy: TranscriptionSecretStoring,
+  @unchecked Sendable
+{
+  private let lock = NSLock()
+  private var reads = 0
+
+  var readCount: Int {
+    lock.withLock { reads }
+  }
+
+  func secret(for provider: TranscriptionProvider) throws -> String? {
+    lock.withLock {
+      reads += 1
+    }
+    return nil
+  }
+
+  func saveSecret(_ secret: String, for provider: TranscriptionProvider) throws {}
+
+  func removeSecret(for provider: TranscriptionProvider) throws {}
 }

@@ -3,6 +3,7 @@ import SwiftUI
 
 struct OnboardingView: View {
   @Environment(\.dismissWindow) private var dismissWindow
+  @Environment(\.openWindow) private var openWindow
   let controller: AppController
   @State private var consentAccepted = false
   @State private var microphoneGranted = AudioCaptureController.hasMicrophonePermission
@@ -284,6 +285,8 @@ struct OnboardingView: View {
               _ = controller.setLaunchAtLogin(launchAtLogin)
               controller.completeOnboarding()
               dismissWindow(id: "onboarding")
+              openWindow(id: "main")
+              NSApplication.shared.activate(ignoringOtherApps: true)
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
@@ -342,7 +345,7 @@ struct OnboardingView: View {
 
         Spacer()
 
-        Text("No meeting bot. No Dock clutter.")
+        Text("No meeting bot. One library, with quick menu-bar controls.")
           .font(.caption)
           .foregroundStyle(.tertiary)
           .fixedSize(horizontal: false, vertical: true)

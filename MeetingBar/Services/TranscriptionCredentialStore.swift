@@ -7,6 +7,16 @@ protocol TranscriptionSecretStoring: Sendable {
   func removeSecret(for provider: TranscriptionProvider) throws
 }
 
+struct EmptyTranscriptionSecretStore: TranscriptionSecretStoring {
+  func secret(for provider: TranscriptionProvider) throws -> String? {
+    nil
+  }
+
+  func saveSecret(_ secret: String, for provider: TranscriptionProvider) throws {}
+
+  func removeSecret(for provider: TranscriptionProvider) throws {}
+}
+
 enum TranscriptionCredentialError: LocalizedError, Sendable {
   case unsupportedProvider
   case emptySecret

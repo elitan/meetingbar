@@ -2,42 +2,32 @@ import SwiftUI
 
 struct SettingsView: View {
   let controller: AppController
-  @State private var selectedSection: SettingsSection? = .capture
+  @Binding var selectedSection: SettingsSection
   @State private var microphoneGranted = AudioCaptureController.hasMicrophonePermission
   @State private var screenGranted = AudioCaptureController.hasScreenPermission
   @State private var elevenLabsAPIKey = ""
   @State private var apiKeyFeedback: APIKeyFeedback?
 
   var body: some View {
-    NavigationSplitView {
-      List(SettingsSection.allCases, selection: $selectedSection) { section in
-        Label(section.title, systemImage: section.symbol)
-          .tag(section)
-      }
-      .navigationTitle("Settings")
-      .navigationSplitViewColumnWidth(min: 170, ideal: 190, max: 220)
-    } detail: {
-      ZStack {
-        MeetingBarBackdrop()
-        ScrollView {
-          VStack(alignment: .leading, spacing: 18) {
-            switch selectedSection ?? .capture {
-            case .capture:
-              captureSettings
-            case .transcription:
-              transcriptionSettings
-            case .general:
-              generalSettings
-            }
+    ZStack {
+      MeetingBarBackdrop()
+      ScrollView {
+        VStack(alignment: .leading, spacing: 18) {
+          switch selectedSection {
+          case .capture:
+            captureSettings
+          case .transcription:
+            transcriptionSettings
+          case .general:
+            generalSettings
           }
-          .padding(28)
-          .frame(maxWidth: 760, alignment: .leading)
-          .frame(maxWidth: .infinity)
         }
+        .padding(28)
+        .frame(maxWidth: 760, alignment: .leading)
+        .frame(maxWidth: .infinity)
       }
     }
-    .navigationSplitViewStyle(.balanced)
-    .frame(minWidth: 800, minHeight: 650)
+    .frame(minWidth: 640, minHeight: 560)
     .meetingBarWindowTint()
     .onAppear {
       refreshPermissionStatus()
@@ -497,7 +487,7 @@ struct SettingsView: View {
     ) {
       SettingToggleRow(
         title: "Launch MeetingBar at login",
-        detail: "Runs quietly in the menu bar with no Dock icon.",
+        detail: "Starts MeetingBar automatically. Close the main window whenever you only need the menu-bar controls.",
         isOn: Binding(
           get: { controller.launchAtLoginEnabled },
           set: { _ = controller.setLaunchAtLogin($0) }
@@ -735,7 +725,7 @@ private enum APIKeyFeedback {
   }
 }
 
-private enum SettingsSection: String, CaseIterable, Identifiable {
+enum SettingsSection: String, CaseIterable, Identifiable {
   case capture
   case transcription
   case general

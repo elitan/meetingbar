@@ -191,6 +191,7 @@ final class TranscriptionPreferenceStore {
   @ObservationIgnored private let languageKey = "TranscriptionLanguagePreference"
   @ObservationIgnored private let qualityKey = "TranscriptionQuality"
   @ObservationIgnored private let elevenLabsModelKey = "ElevenLabsTranscriptionModel"
+  @ObservationIgnored private let elevenLabsCredentialKey = "HasElevenLabsAPIKey"
 
   var configuration: TranscriptionConfiguration {
     TranscriptionConfiguration(
@@ -207,10 +208,11 @@ final class TranscriptionPreferenceStore {
   ) {
     self.userDefaults = userDefaults
     self.secretStore = secretStore
-    provider =
+    let storedProvider =
       TranscriptionProvider(
         rawValue: userDefaults.string(forKey: providerKey) ?? ""
       ) ?? .onDevice
+    provider = storedProvider
     language =
       TranscriptionLanguagePreference(
         rawValue: userDefaults.string(forKey: languageKey) ?? ""
@@ -223,8 +225,12 @@ final class TranscriptionPreferenceStore {
       ElevenLabsTranscriptionModel(
         rawValue: userDefaults.string(forKey: elevenLabsModelKey) ?? ""
       ) ?? .scribeV2
-    hasElevenLabsAPIKey =
-      ((try? secretStore.secret(for: .elevenLabs)) ?? nil)?.isEmpty == false
+    if userDefaults.object(forKey: elevenLabsCredentialKey) == nil {
+      // Migrate existing ElevenLabs users without touching Keychain during app startup.
+      hasElevenLabsAPIKey = storedProvider == .elevenLabs
+    } else {
+      hasElevenLabsAPIKey = userDefaults.bool(forKey: elevenLabsCredentialKey)
+    }
   }
 
   func setProvider(_ provider: TranscriptionProvider) {
@@ -250,10 +256,17 @@ final class TranscriptionPreferenceStore {
   func saveElevenLabsAPIKey(_ apiKey: String) throws {
     try secretStore.saveSecret(apiKey, for: .elevenLabs)
     hasElevenLabsAPIKey = true
+    userDefaults.set(true, forKey: elevenLabsCredentialKey)
   }
 
   func removeElevenLabsAPIKey() throws {
     try secretStore.removeSecret(for: .elevenLabs)
     hasElevenLabsAPIKey = false
+    userDefaults.set(false, forKey: elevenLabsCredentialKey)
+  }
+
+  func markElevenLabsAPIKeyUnavailable() {
+    hasElevenLabsAPIKey = false
+    userDefaults.set(false, forKey: elevenLabsCredentialKey)
   }
 }

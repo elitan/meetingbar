@@ -2,11 +2,11 @@ import SwiftData
 import SwiftUI
 
 struct LibraryView: View {
-  @Environment(\.openSettings) private var openSettings
   @Query(sort: \Recording.startedAt, order: .reverse) private var recordings: [Recording]
   @State private var searchText = ""
   @State private var selectedRecordingID: UUID?
   let controller: AppController
+  @Bindable var navigation: MeetingBarNavigation
 
   private var filteredRecordings: [Recording] {
     let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -36,27 +36,22 @@ struct LibraryView: View {
       librarySidebar
         .navigationSplitViewColumnWidth(min: 270, ideal: 310, max: 360)
     } detail: {
-      ZStack {
-        MeetingBarBackdrop()
-        if let recording = recordings.first(where: { $0.id == selectedRecordingID }) {
-          RecordingDetailView(recording: recording, controller: controller)
-        } else {
-          LibraryWelcomeView(hasRecordings: !recordings.isEmpty, controller: controller)
+      switch navigation.workspace {
+      case .library:
+        ZStack {
+          MeetingBarBackdrop()
+          if let recording = recordings.first(where: { $0.id == selectedRecordingID }) {
+            RecordingDetailView(recording: recording, controller: controller)
+          } else {
+            LibraryWelcomeView(hasRecordings: !recordings.isEmpty, controller: controller)
+          }
         }
+      case .settings:
+        SettingsView(controller: controller, selectedSection: $navigation.settingsSection)
       }
     }
     .navigationSplitViewStyle(.balanced)
     .meetingBarWindowTint()
-    .toolbar {
-      ToolbarItem {
-        Button {
-          openSettings()
-        } label: {
-          Label("Settings", systemImage: "slider.horizontal.3")
-        }
-        .help("MeetingBar Settings")
-      }
-    }
     .onAppear {
       selectFirstRecordingIfNeeded()
     }
@@ -87,11 +82,42 @@ struct LibraryView: View {
       }
       .padding(.horizontal, 18)
       .padding(.top, 16)
-      .padding(.bottom, 15)
+      .padding(.bottom, 12)
 
+      Picker("Workspace", selection: $navigation.workspace) {
+        ForEach(MeetingBarWorkspace.allCases) { workspace in
+          Label(workspace.title, systemImage: workspace.symbol)
+            .tag(workspace)
+        }
+      }
+      .pickerStyle(.segmented)
+      .labelsHidden()
+      .padding(.horizontal, 14)
+      .padding(.bottom, 12)
+
+      Divider()
+        .opacity(0.55)
+
+      if navigation.workspace == .library {
+        libraryNavigation
+      } else {
+        settingsNavigation
+      }
+
+      Divider()
+        .opacity(0.55)
+
+      SidebarRecordingControl(controller: controller)
+        .padding(12)
+    }
+    .background(.ultraThinMaterial)
+  }
+
+  private var libraryNavigation: some View {
+    VStack(spacing: 0) {
       searchField
         .padding(.horizontal, 14)
-        .padding(.bottom, 12)
+        .padding(.vertical, 12)
 
       Divider()
         .opacity(0.55)
@@ -118,14 +144,54 @@ struct LibraryView: View {
         .padding(.horizontal, 9)
         .padding(.vertical, 10)
       }
-
-      Divider()
-        .opacity(0.55)
-
-      SidebarRecordingControl(controller: controller)
-        .padding(12)
     }
-    .background(.ultraThinMaterial)
+  }
+
+  private var settingsNavigation: some View {
+    ScrollView {
+      VStack(alignment: .leading, spacing: 5) {
+        sidebarSectionTitle("Settings", symbol: "slider.horizontal.3")
+        ForEach(SettingsSection.allCases) { section in
+          Button {
+            navigation.showSettings(section)
+          } label: {
+            HStack(spacing: 11) {
+              MeetingBarIconTile(
+                symbol: section.symbol,
+                color: navigation.settingsSection == section
+                  ? MeetingBarTheme.accent
+                  : .secondary,
+                size: 34
+              )
+              Text(section.title)
+                .font(.subheadline.weight(.semibold))
+              Spacer()
+              Image(systemName: "chevron.right")
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 9)
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .background(
+              navigation.settingsSection == section
+                ? MeetingBarTheme.accent.opacity(0.14)
+                : Color.clear,
+              in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+            )
+            .overlay {
+              if navigation.settingsSection == section {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                  .stroke(MeetingBarTheme.accent.opacity(0.20), lineWidth: 1)
+              }
+            }
+          }
+          .buttonStyle(.plain)
+        }
+      }
+      .padding(.horizontal, 9)
+      .padding(.vertical, 10)
+    }
   }
 
   private var searchField: some View {
@@ -173,6 +239,7 @@ struct LibraryView: View {
         controller: controller,
         isSelected: recording.id == selectedRecordingID
       ) {
+        navigation.showLibrary()
         selectedRecordingID = recording.id
       }
     }

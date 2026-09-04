@@ -5,6 +5,46 @@ import XCTest
 
 @MainActor
 final class LibraryAndSpeakerTests: XCTestCase {
+  func testProductionLaunchDoesNotUseTheTestRuntime() {
+    XCTAssertFalse(MeetingBarRuntime.isRunningTests(environment: [:]))
+  }
+
+  func testXCTestHostUsesTheIsolatedRuntime() {
+    XCTAssertTrue(
+      MeetingBarRuntime.isRunningTests(
+        environment: ["XCTestConfigurationFilePath": "/tmp/MeetingBarTests.xctestconfiguration"]
+      )
+    )
+  }
+
+  func testUnifiedNavigationMovesBetweenLibraryAndSettings() {
+    let navigation = MeetingBarNavigation()
+
+    XCTAssertEqual(navigation.workspace, .library)
+    XCTAssertEqual(navigation.settingsSection, .capture)
+
+    navigation.showSettings(.transcription)
+
+    XCTAssertEqual(navigation.workspace, .settings)
+    XCTAssertEqual(navigation.settingsSection, .transcription)
+
+    navigation.showLibrary()
+
+    XCTAssertEqual(navigation.workspace, .library)
+    XCTAssertEqual(navigation.settingsSection, .transcription)
+  }
+
+  func testOpeningSettingsWithoutASectionPreservesTheLastSettingsPage() {
+    let navigation = MeetingBarNavigation()
+    navigation.showSettings(.general)
+    navigation.showLibrary()
+
+    navigation.showSettings()
+
+    XCTAssertEqual(navigation.workspace, .settings)
+    XCTAssertEqual(navigation.settingsSection, .general)
+  }
+
   func testPinnedStateIsStoredWithRecording() throws {
     let configuration = ModelConfiguration(isStoredInMemoryOnly: true)
     let container = try ModelContainer(for: Recording.self, configurations: configuration)

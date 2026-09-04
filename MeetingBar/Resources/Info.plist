@@ -22,8 +22,6 @@
 	<string>4</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
-	<key>LSUIElement</key>
-	<true/>
 	<key>NSHumanReadableCopyright</key>
 	<string>Copyright © 2026 Johan Eliasson</string>
 	<key>NSMicrophoneUsageDescription</key>

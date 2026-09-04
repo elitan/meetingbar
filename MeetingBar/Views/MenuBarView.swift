@@ -4,6 +4,7 @@ import SwiftUI
 struct MenuBarStatusLabel: View {
   @Environment(\.openWindow) private var openWindow
   let controller: AppController
+  let navigation: MeetingBarNavigation
 
   var body: some View {
     HStack(spacing: 4) {
@@ -18,20 +19,24 @@ struct MenuBarStatusLabel: View {
     .task {
       await controller.launch()
       if ProcessInfo.processInfo.arguments.contains("--open-library") {
-        openWindow(id: "library")
-        NSApplication.shared.activate(ignoringOtherApps: true)
+        navigation.showLibrary()
+        openPrimaryInterface()
       } else if !controller.onboardingComplete {
-        openWindow(id: "onboarding")
-        NSApplication.shared.activate(ignoringOtherApps: true)
+        openPrimaryInterface()
       }
     }
+  }
+
+  private func openPrimaryInterface() {
+    openWindow(id: controller.onboardingComplete ? "main" : "onboarding")
+    NSApplication.shared.activate(ignoringOtherApps: true)
   }
 }
 
 struct MenuBarView: View {
   @Environment(\.openWindow) private var openWindow
-  @Environment(\.openSettings) private var openSettings
   let controller: AppController
+  let navigation: MeetingBarNavigation
 
   var body: some View {
     ZStack {
@@ -187,7 +192,7 @@ struct MenuBarView: View {
 
       Divider()
       Button("Manage Microphone Priority…") {
-        openSettingsWindow()
+        openSettingsWindow(section: .capture)
       }
     } label: {
       HStack(spacing: 10) {
@@ -218,8 +223,7 @@ struct MenuBarView: View {
   private var popoverFooter: some View {
     HStack(spacing: 6) {
       Button {
-        openWindow(id: "library")
-        NSApplication.shared.activate(ignoringOtherApps: true)
+        openLibraryWindow()
       } label: {
         Label("Library", systemImage: "rectangle.stack")
       }
@@ -324,8 +328,15 @@ struct MenuBarView: View {
     .background(color.opacity(0.08), in: RoundedRectangle(cornerRadius: 11))
   }
 
-  private func openSettingsWindow() {
-    openSettings()
+  private func openLibraryWindow() {
+    navigation.showLibrary()
+    openWindow(id: "main")
+    NSApplication.shared.activate(ignoringOtherApps: true)
+  }
+
+  private func openSettingsWindow(section: SettingsSection? = nil) {
+    navigation.showSettings(section)
+    openWindow(id: "main")
     NSApplication.shared.activate(ignoringOtherApps: true)
   }
 }
