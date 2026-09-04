@@ -17,6 +17,18 @@ final class LibraryAndSpeakerTests: XCTestCase {
     )
   }
 
+  func testApplicationBecomesAccessoryOnlyAfterLastPrimaryWindowCloses() {
+    XCTAssertFalse(
+      MeetingBarApplicationPresentation.shouldBecomeAccessory(primaryWindowCount: 2)
+    )
+    XCTAssertFalse(
+      MeetingBarApplicationPresentation.shouldBecomeAccessory(primaryWindowCount: 1)
+    )
+    XCTAssertTrue(
+      MeetingBarApplicationPresentation.shouldBecomeAccessory(primaryWindowCount: 0)
+    )
+  }
+
   func testUnifiedNavigationMovesBetweenLibraryAndSettings() {
     let navigation = MeetingBarNavigation()
 

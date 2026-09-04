@@ -28,8 +28,10 @@ struct MenuBarStatusLabel: View {
   }
 
   private func openPrimaryInterface() {
-    openWindow(id: controller.onboardingComplete ? "main" : "onboarding")
-    NSApplication.shared.activate(ignoringOtherApps: true)
+    MeetingBarApplicationPresentation.openWindow(
+      id: controller.onboardingComplete ? "main" : "onboarding",
+      using: openWindow
+    )
   }
 }
 
@@ -330,13 +332,11 @@ struct MenuBarView: View {
 
   private func openLibraryWindow() {
     navigation.showLibrary()
-    openWindow(id: "main")
-    NSApplication.shared.activate(ignoringOtherApps: true)
+    MeetingBarApplicationPresentation.openWindow(id: "main", using: openWindow)
   }
 
   private func openSettingsWindow(section: SettingsSection? = nil) {
     navigation.showSettings(section)
-    openWindow(id: "main")
-    NSApplication.shared.activate(ignoringOtherApps: true)
+    MeetingBarApplicationPresentation.openWindow(id: "main", using: openWindow)
   }
 }

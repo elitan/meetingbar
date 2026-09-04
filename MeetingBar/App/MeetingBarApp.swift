@@ -52,6 +52,95 @@ enum MeetingBarRuntime {
   }
 }
 
+@MainActor
+enum MeetingBarApplicationPresentation {
+  private static var primaryWindows: Set<ObjectIdentifier> = []
+
+  static func startInMenuBarMode() {
+    primaryWindows.removeAll()
+    NSApplication.shared.setActivationPolicy(.accessory)
+  }
+
+  static func openWindow(id: String, using openWindow: OpenWindowAction) {
+    NSApplication.shared.setActivationPolicy(.regular)
+    Task { @MainActor in
+      // Give AppKit one run-loop turn to publish the activation-policy change.
+      // Opening a SwiftUI scene in the same turn can be dropped when the app
+      // has just transitioned out of accessory mode.
+      await Task.yield()
+      openWindow(id: id)
+      NSApplication.shared.activate(ignoringOtherApps: true)
+    }
+  }
+
+  static func primaryWindowDidOpen(_ window: NSWindow) {
+    primaryWindows.insert(ObjectIdentifier(window))
+    NSApplication.shared.setActivationPolicy(.regular)
+  }
+
+  static func primaryWindowWillClose(_ window: NSWindow) {
+    primaryWindows.remove(ObjectIdentifier(window))
+    if shouldBecomeAccessory(primaryWindowCount: primaryWindows.count) {
+      NSApplication.shared.setActivationPolicy(.accessory)
+    }
+  }
+
+  static func shouldBecomeAccessory(primaryWindowCount: Int) -> Bool {
+    primaryWindowCount == 0
+  }
+}
+
+private struct MeetingBarPrimaryWindowBehavior: NSViewRepresentable {
+  func makeNSView(context: Context) -> MeetingBarWindowLifecycleView {
+    MeetingBarWindowLifecycleView()
+  }
+
+  func updateNSView(_ nsView: MeetingBarWindowLifecycleView, context: Context) {}
+}
+
+@MainActor
+private final class MeetingBarWindowLifecycleView: NSView {
+  private weak var observedWindow: NSWindow?
+
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    guard observedWindow !== window else {
+      return
+    }
+    if let observedWindow {
+      NotificationCenter.default.removeObserver(
+        self,
+        name: NSWindow.willCloseNotification,
+        object: observedWindow
+      )
+    }
+    observedWindow = window
+    guard let window else {
+      return
+    }
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(windowWillClose(_:)),
+      name: NSWindow.willCloseNotification,
+      object: window
+    )
+    MeetingBarApplicationPresentation.primaryWindowDidOpen(window)
+  }
+
+  @objc private func windowWillClose(_ notification: Notification) {
+    guard let window = notification.object as? NSWindow else {
+      return
+    }
+    MeetingBarApplicationPresentation.primaryWindowWillClose(window)
+  }
+}
+
+private extension View {
+  func meetingBarPrimaryWindowBehavior() -> some View {
+    background(MeetingBarPrimaryWindowBehavior().frame(width: 0, height: 0))
+  }
+}
+
 @main
 struct MeetingBarApp: App {
   private let modelContainer: ModelContainer
@@ -61,6 +150,9 @@ struct MeetingBarApp: App {
   init() {
     let environment = ProcessInfo.processInfo.environment
     let isRunningTests = MeetingBarRuntime.isRunningTests(environment: environment)
+    if !isRunningTests {
+      MeetingBarApplicationPresentation.startInMenuBarMode()
+    }
 
     do {
       let container = try ModelContainer(for: Recording.self)
@@ -93,6 +185,7 @@ struct MeetingBarApp: App {
     Window("MeetingBar", id: "main") {
       LibraryView(controller: controller, navigation: navigation)
         .modelContainer(modelContainer)
+        .meetingBarPrimaryWindowBehavior()
     }
     .defaultSize(width: 1120, height: 720)
     .commands {
@@ -102,6 +195,7 @@ struct MeetingBarApp: App {
     Window("Welcome to MeetingBar", id: "onboarding") {
       OnboardingView(controller: controller)
         .modelContainer(modelContainer)
+        .meetingBarPrimaryWindowBehavior()
     }
     .windowResizability(.contentSize)
   }
@@ -130,7 +224,6 @@ private struct MeetingBarCommands: Commands {
   }
 
   private func openMainWindow() {
-    openWindow(id: "main")
-    NSApplication.shared.activate(ignoringOtherApps: true)
+    MeetingBarApplicationPresentation.openWindow(id: "main", using: openWindow)
   }
 }

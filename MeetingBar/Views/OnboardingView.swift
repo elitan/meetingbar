@@ -285,8 +285,7 @@ struct OnboardingView: View {
               _ = controller.setLaunchAtLogin(launchAtLogin)
               controller.completeOnboarding()
               dismissWindow(id: "onboarding")
-              openWindow(id: "main")
-              NSApplication.shared.activate(ignoringOtherApps: true)
+              MeetingBarApplicationPresentation.openWindow(id: "main", using: openWindow)
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
