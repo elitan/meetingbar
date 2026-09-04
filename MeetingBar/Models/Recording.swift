@@ -39,6 +39,7 @@ final class Recording {
   var statusRawValue: String
   var transcript: String
   var detectedLanguage: String?
+  var transcriptionProviderRawValue: String?
   var modelIdentifier: String?
   var captureWarnings: [String]
   var audioRelativePath: String?
@@ -60,6 +61,7 @@ final class Recording {
     status: RecordingStatus = .queued,
     transcript: String = "",
     detectedLanguage: String? = nil,
+    transcriptionProvider: TranscriptionProvider? = nil,
     modelIdentifier: String? = nil,
     captureWarnings: [String] = [],
     audioRelativePath: String? = nil,
@@ -80,6 +82,7 @@ final class Recording {
     self.statusRawValue = status.rawValue
     self.transcript = transcript
     self.detectedLanguage = detectedLanguage
+    transcriptionProviderRawValue = transcriptionProvider?.rawValue
     self.modelIdentifier = modelIdentifier
     self.captureWarnings = captureWarnings
     self.audioRelativePath = audioRelativePath
@@ -105,6 +108,40 @@ final class Recording {
       titleOriginRawValue = newValue.rawValue
       updatedAt = .now
     }
+  }
+
+  var transcriptionProvider: TranscriptionProvider? {
+    get {
+      if let transcriptionProviderRawValue {
+        return TranscriptionProvider(rawValue: transcriptionProviderRawValue)
+      }
+      return modelIdentifier == nil ? nil : .onDevice
+    }
+    set {
+      transcriptionProviderRawValue = newValue?.rawValue
+      updatedAt = .now
+    }
+  }
+
+  var transcriptionEngineLabel: String? {
+    guard let modelIdentifier else {
+      return nil
+    }
+    let provider = transcriptionProvider ?? .onDevice
+    let modelLabel: String
+    switch provider {
+    case .onDevice:
+      modelLabel =
+        TranscriptionQuality.allCases.first(where: {
+          $0.modelIdentifier == modelIdentifier
+        })?.label ?? modelIdentifier
+    case .elevenLabs:
+      modelLabel =
+        ElevenLabsTranscriptionModel.allCases.first(where: {
+          $0.modelIdentifier == modelIdentifier
+        })?.label ?? modelIdentifier
+    }
+    return "\(provider.label) · \(modelLabel)"
   }
 
   var needsGeneratedTitle: Bool {

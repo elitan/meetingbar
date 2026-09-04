@@ -39,7 +39,6 @@ struct PreparedPlaybackAudio: Sendable {
 struct PlaybackAudioProcessor: Sendable {
   private static let fileName = "playback-balanced-v1.wav"
   private static let partialFileName = "playback-balanced-v1.partial.wav"
-  private static let chunkSize = 32_768
 
   func prepare(
     recordingID: UUID,
@@ -95,42 +94,12 @@ struct PlaybackAudioProcessor: Sendable {
     }
 
     let partialURL = directory.appending(path: Self.partialFileName)
-    try? fileManager.removeItem(at: partialURL)
-
-    do {
-      let tracks = try preparedSources.map(PlaybackTrackReader.init)
-      let writer = try PCM16WAVWriter(partialURL: partialURL, finalURL: outputURL)
-      while true {
-        try Task.checkCancellation()
-        let chunks = try tracks.map { try $0.read(maxCount: Self.chunkSize) }
-        let validSampleCount = chunks.map(\.validSampleCount).max() ?? 0
-        guard validSampleCount > 0 else {
-          break
-        }
-
-        var mixed = [Float](repeating: 0, count: validSampleCount)
-        for index in 0..<validSampleCount {
-          var sum: Float = 0
-          var activeTrackCount = 0
-          for chunk in chunks where index < chunk.samples.count {
-            let sample = chunk.samples[index]
-            sum += sample
-            if abs(sample) > 0.000_001 {
-              activeTrackCount += 1
-            }
-          }
-          if activeTrackCount > 1 {
-            sum /= sqrt(Float(activeTrackCount))
-          }
-          mixed[index] = softLimit(sum)
-        }
-        try writer.append(floatSamples: mixed)
-      }
-      _ = try writer.finish(fileManager: fileManager)
-    } catch {
-      try? fileManager.removeItem(at: partialURL)
-      throw error
-    }
+    try AlignedPCM16AudioMixer.write(
+      preparedSources: preparedSources,
+      partialURL: partialURL,
+      finalURL: outputURL,
+      fileManager: fileManager
+    )
 
     return PreparedPlaybackAudio(
       audioURL: outputURL,
@@ -174,52 +143,4 @@ struct PlaybackAudioProcessor: Sendable {
     return TranscriptionAudioPreprocessor.recommendedGainDB(for: signal)
   }
 
-  private func softLimit(_ sample: Float) -> Float {
-    let magnitude = abs(sample)
-    guard magnitude > 0.85 else {
-      return sample
-    }
-    let compressed = 0.85 + 0.13 * (1 - exp(-(magnitude - 0.85) / 0.13))
-    return sample.sign == .minus ? -compressed : compressed
-  }
-}
-
-private final class PlaybackTrackReader {
-  private let reader: PCM16WAVReader
-  private var remainingOffsetSamples: Int
-  private var exhausted = false
-
-  init(prepared: PreparedTranscriptionAudio) throws {
-    reader = try PCM16WAVReader(url: prepared.audioURL)
-    remainingOffsetSamples = max(
-      0,
-      Int((prepared.source.offsetSeconds * Double(PCM16WAVWriter.sampleRate)).rounded())
-    )
-  }
-
-  func read(maxCount: Int) throws -> PlaybackTrackChunk {
-    guard !exhausted || remainingOffsetSamples > 0 else {
-      return PlaybackTrackChunk(samples: [], validSampleCount: 0)
-    }
-
-    let leadingSilenceCount = min(remainingOffsetSamples, maxCount)
-    remainingOffsetSamples -= leadingSilenceCount
-    var samples = [Float](repeating: 0, count: leadingSilenceCount)
-
-    if samples.count < maxCount, !exhausted {
-      let requestedCount = maxCount - samples.count
-      if let sourceSamples = try reader.readSamples(maxCount: requestedCount) {
-        samples.append(contentsOf: sourceSamples.map { Float($0) / 32_768 })
-      } else {
-        exhausted = true
-      }
-    }
-
-    return PlaybackTrackChunk(samples: samples, validSampleCount: samples.count)
-  }
-}
-
-private struct PlaybackTrackChunk {
-  let samples: [Float]
-  let validSampleCount: Int
 }

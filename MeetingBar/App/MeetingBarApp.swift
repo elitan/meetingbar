@@ -22,13 +22,13 @@ struct MeetingBarApp: App {
     } label: {
       MenuBarStatusLabel(controller: controller)
     }
-    .menuBarExtraStyle(.menu)
+    .menuBarExtraStyle(.window)
 
     Window("MeetingBar", id: "library") {
       LibraryView(controller: controller)
         .modelContainer(modelContainer)
     }
-    .defaultSize(width: 920, height: 620)
+    .defaultSize(width: 1120, height: 720)
 
     Window("Welcome to MeetingBar", id: "onboarding") {
       OnboardingView(controller: controller)
@@ -42,4 +42,3 @@ struct MeetingBarApp: App {
     }
   }
 }
-

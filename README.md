@@ -1,10 +1,10 @@
 # MeetingBar
 
-MeetingBar is a private, native macOS menu-bar recorder for in-person meetings and calls. It captures your preferred available microphone and system audio, transcribes entirely on-device with WhisperKit, detects speakers on-device with SpeakerKit, and keeps a searchable local transcript library. After transcription, Apple's on-device system language model turns the date placeholder into a short grounded meeting title when the model is available.
+MeetingBar is a native macOS menu-bar recorder for in-person meetings and calls. It captures your preferred available microphone and system audio, transcribes with either local WhisperKit or the optional ElevenLabs Scribe cloud service, and keeps a searchable local transcript library. Local transcription detects speakers with SpeakerKit; ElevenLabs uses Scribe diarization. After transcription, Apple's on-device system language model turns the date placeholder into a short grounded meeting title when the model is available.
 
 Important meetings can be pinned above the chronological library, and titles can be renamed directly in the left list by double-clicking or using the context menu. A manual title is never replaced by a generated one. When multiple speakers are detected, transcripts are split into turns prefixed with `Speaker 0`, `Speaker 1`, and so on. Single-speaker transcripts remain plain text. Speaker numbers are local to each meeting and assigned by first appearance.
 
-Audio plays directly inside MeetingBar. Playback measures and balances the retained microphone and system tracks independently for every recording, regardless of the connected device, then applies a soft limiter without changing either source file. Transcription uses the same timestamp-aligned tracks so each side can be normalized and recognized independently before the transcript is merged. This avoids volume loss and speaker masking from relying only on the raw mix.
+Audio plays directly inside MeetingBar. Playback measures and balances the retained microphone and system tracks independently for every recording, regardless of the connected device, then applies a soft limiter without changing either source file. Local transcription recognizes the timestamp-aligned tracks independently before merging their text. ElevenLabs transcription instead normalizes and aligns both tracks locally, mixes them into one temporary mono file, and uploads that file once. This preserves balanced speech without billing twice for the same meeting duration.
 
 ## Requirements
 
@@ -20,7 +20,7 @@ xcodegen generate
 xcodebuild -project MeetingBar.xcodeproj -scheme MeetingBar -configuration Debug build
 ```
 
-The first launch walks through recording consent, permissions, the on-device model downloads, the global shortcut, and launch at login. The default shortcut is Control–Option–Command–M.
+The first launch walks through recording consent, permissions, transcription provider and model selection, the global shortcut, and launch at login. The default shortcut is Control–Option–Command–M.
 
 Microphones can be selected directly from the menu-bar menu and ordered in Settings. MeetingBar persists each device by its macOS unique identifier, uses the first connected microphone in the priority list, falls back when it disappears, and automatically returns to a higher-priority device when it reconnects. Devices remain remembered while disconnected until explicitly forgotten.
 
@@ -28,16 +28,20 @@ Online meeting reminders are enabled by default. MeetingBar reads Core Audio pro
 
 Browser reminders cover calls such as Google Meet, Zoom Web, and Teams Web, but macOS identifies the browser rather than the active tab. A non-meeting website using the microphone can therefore trigger the same reminder. Native-app and browser reminders can be configured separately in Settings. No calendar account or calendar permission is used.
 
+Forgotten-recording protection is enabled by default. When Zoom, Microsoft Teams, or an included browser stops using the microphone during a recording, MeetingBar waits one minute and then shows a centered 30-second **Still recording?** countdown. Background music does not postpone this call-ended prompt. MeetingBar also prompts when both audio sources have been quiet for five minutes. **Keep Recording** dismisses the current prompt, **Stop Now** ends immediately, and a resumed call cancels its countdown. If there is no response, MeetingBar safely saves and stops the recording, starts transcription normally, and confirms the automatic stop. The protection can be disabled in Settings.
+
 Settings also provides:
 
 - Automatic, Swedish, or English language selection. Automatic is the default and is recommended unless detection chooses the wrong language.
-- A full `large-v3` model for best accuracy, or the smaller `large-v3-v20240930_626MB` model.
+- A global provider choice for all new recordings and manual retries.
+- Local WhisperKit with the full `large-v3` model for best accuracy or the smaller `large-v3-v20240930_626MB` model.
+- Optional ElevenLabs batch transcription with `scribe_v2`. The API key is stored only in macOS Keychain. When selected, MeetingBar balances the microphone and system-audio tracks locally and uploads one temporary mono file after Stop. After the transcript is stored locally, MeetingBar requests deletion of the remote transcript. Failed deletion requests are persisted under Application Support and retried after relaunch. ElevenLabs may still retain logs or backups according to its account and privacy policies.
 
 Before transcription, quiet tracks are raised toward a speech-safe level without changing the retained source recording. A limiter prevents clipping, actual audio activity is checked against Whisper timestamps to reject text invented over silence, and likely microphone echo is removed when the same speech exists on both tracks. SpeakerKit then aligns Pyannote speaker clusters to Whisper's word timestamps. If diarization is unavailable, transcription still succeeds with one fallback speaker label per active source.
 
 Existing recordings with retained audio can be upgraded from the meeting detail view with **Detect Speakers**. This re-runs transcription and speaker detection without changing the source audio.
 
-Meeting metadata is stored with SwiftData. Audio and model files remain inside MeetingBar's Application Support container. Completed source audio is removed after 30 days; transcripts remain.
+Meeting metadata is stored with SwiftData. Audio and model files remain inside MeetingBar's Application Support container. Source audio and transcripts are kept indefinitely until you explicitly delete the meeting, which removes both.
 
 ## Release installation
 

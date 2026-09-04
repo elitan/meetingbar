@@ -14,12 +14,17 @@ enum TranscriptionQueueEvent: Sendable {
   case speakerModelPreparing
   case speakerModelReady
   case speakerModelFailed(String)
-  case started(UUID)
+  case started(
+    recordingID: UUID,
+    provider: TranscriptionProvider,
+    modelIdentifier: String
+  )
   case idle
   case completed(
     recordingID: UUID,
     transcript: String,
     language: String?,
+    provider: TranscriptionProvider,
     modelIdentifier: String,
     warnings: [String]
   )
@@ -44,8 +49,11 @@ actor TranscriptionQueue {
   static let recommendedModelIdentifier = TranscriptionQuality.bestAccuracy.modelIdentifier
 
   private let modelsURL: URL
-  private let eventHandler: @MainActor @Sendable (TranscriptionQueueEvent) -> Void
+  private let eventHandler: @MainActor @Sendable (TranscriptionQueueEvent) -> Bool
+  private let elevenLabsClient: ElevenLabsTranscriptionClient
+  private let elevenLabsCleanupQueue: ElevenLabsTranscriptCleanupQueue
   private let preprocessor = TranscriptionAudioPreprocessor()
+  private let elevenLabsAudioPreparer = ElevenLabsAudioPreparer()
   private var pendingJobs: [TranscriptionJob] = []
   private var knownJobIDs: Set<UUID> = []
   private var processingTask: Task<Void, Never>?
@@ -58,15 +66,34 @@ actor TranscriptionQueue {
 
   init(
     modelsURL: URL,
-    eventHandler: @escaping @MainActor @Sendable (TranscriptionQueueEvent) -> Void
+    secretStore: any TranscriptionSecretStoring = KeychainTranscriptionSecretStore(),
+    elevenLabsTransport: any ElevenLabsHTTPTransport = URLSessionElevenLabsHTTPTransport(),
+    elevenLabsCleanupURL: URL? = nil,
+    eventHandler: @escaping @MainActor @Sendable (TranscriptionQueueEvent) -> Bool
   ) {
     self.modelsURL = modelsURL
+    let client = ElevenLabsTranscriptionClient(
+      secretStore: secretStore,
+      transport: elevenLabsTransport
+    )
+    elevenLabsClient = client
+    elevenLabsCleanupQueue = ElevenLabsTranscriptCleanupQueue(
+      client: client,
+      persistenceURL: elevenLabsCleanupURL
+        ?? modelsURL.deletingLastPathComponent().appending(path: "elevenlabs-cleanup.json")
+    )
     self.eventHandler = eventHandler
   }
 
   func prepareModel(configuration: TranscriptionConfiguration) async throws {
-    try await prepareModel(identifier: configuration.modelIdentifier)
-    _ = try? await prepareSpeakerKit()
+    switch configuration.provider {
+    case .onDevice:
+      try await prepareModel(identifier: configuration.modelIdentifier)
+      _ = try? await prepareSpeakerKit()
+    case .elevenLabs:
+      try elevenLabsClient.ensureConfigured()
+      _ = await eventHandler(.modelReady(modelIdentifier: configuration.modelIdentifier))
+    }
   }
 
   func enqueue(_ job: TranscriptionJob) {
@@ -80,6 +107,20 @@ actor TranscriptionQueue {
   func retry(_ job: TranscriptionJob) {
     knownJobIDs.remove(job.recordingID)
     enqueue(job)
+  }
+
+  func resumeRemoteCleanup() async {
+    await elevenLabsCleanupQueue.resume()
+  }
+
+  func reconcileRemoteCleanup(
+    knownRecordingIDs: Set<UUID>,
+    readyRecordingIDs: Set<UUID>
+  ) async {
+    try? await elevenLabsCleanupQueue.reconcileWithLocalRecordings(
+      knownRecordingIDs: knownRecordingIDs,
+      readyRecordingIDs: readyRecordingIDs
+    )
   }
 
   static func decodeOptions(
@@ -148,7 +189,13 @@ actor TranscriptionQueue {
   private func processPendingJobs() async {
     while !pendingJobs.isEmpty {
       let job = pendingJobs.removeFirst()
-      await eventHandler(.started(job.recordingID))
+      _ = await eventHandler(
+        .started(
+          recordingID: job.recordingID,
+          provider: job.configuration.provider,
+          modelIdentifier: job.configuration.modelIdentifier
+        )
+      )
       await process(job)
       knownJobIDs.remove(job.recordingID)
     }
@@ -156,7 +203,7 @@ actor TranscriptionQueue {
     if !pendingJobs.isEmpty {
       beginProcessingIfNeeded()
     } else {
-      await eventHandler(.idle)
+      _ = await eventHandler(.idle)
     }
   }
 
@@ -168,85 +215,169 @@ actor TranscriptionQueue {
       guard !existingSources.isEmpty else {
         throw TranscriptionQueueError.audioUnavailable
       }
-      try await prepareModel(identifier: job.configuration.modelIdentifier)
-      guard let whisperKit else {
-        throw TranscriptionQueueError.modelUnavailable("The model did not finish loading.")
+      try await prepareModel(configuration: job.configuration)
+      switch job.configuration.provider {
+      case .onDevice:
+        try await processOnDevice(job, sources: existingSources)
+      case .elevenLabs:
+        try await processWithElevenLabs(job, sources: existingSources)
+      }
+    } catch {
+      _ = await eventHandler(
+        .failed(recordingID: job.recordingID, message: error.localizedDescription)
+      )
+    }
+  }
+
+  private func processOnDevice(
+    _ job: TranscriptionJob,
+    sources: [TranscriptionSource]
+  ) async throws {
+    guard let whisperKit else {
+      throw TranscriptionQueueError.modelUnavailable("The model did not finish loading.")
+    }
+
+    var segments: [SourceTranscriptSegment] = []
+    var languageWeights: [String: Int] = [:]
+    var warnings: [String] = []
+    for source in sources {
+      let prepared = try preprocessor.prepare(source)
+      defer {
+        if let temporaryURL = prepared.temporaryURL {
+          try? FileManager.default.removeItem(at: temporaryURL)
+        }
+      }
+      guard prepared.shouldTranscribe else {
+        continue
       }
 
-      var segments: [SourceTranscriptSegment] = []
-      var languageWeights: [String: Int] = [:]
-      var warnings: [String] = []
-      for source in existingSources {
-        let prepared = try preprocessor.prepare(source)
-        defer {
-          if let temporaryURL = prepared.temporaryURL {
-            try? FileManager.default.removeItem(at: temporaryURL)
-          }
-        }
-        guard prepared.shouldTranscribe else {
-          continue
-        }
+      let results = try await whisperKit.transcribe(
+        audioPath: prepared.audioURL.path,
+        audioInputOptions: AudioInputOptions(audioLoadingMode: .incremental),
+        decodeOptions: Self.decodeOptions(for: job.configuration)
+      )
+      let acceptedSegments = TranscriptionPostprocessor.sourceSegments(
+        from: results,
+        source: source,
+        activity: prepared.activity
+      )
+      guard !acceptedSegments.isEmpty else {
+        continue
+      }
 
-        let results = try await whisperKit.transcribe(
-          audioPath: prepared.audioURL.path,
-          audioInputOptions: AudioInputOptions(audioLoadingMode: .incremental),
-          decodeOptions: Self.decodeOptions(for: job.configuration)
-        )
-        let acceptedSegments = TranscriptionPostprocessor.sourceSegments(
+      do {
+        let speakerKit = try await prepareSpeakerKit()
+        let audio = try AudioProcessor.loadAudioAsFloatArray(fromPath: prepared.audioURL.path)
+        let diarization = try await speakerKit.diarize(audioArray: audio)
+        let attributedSegments = TranscriptionPostprocessor.speakerAttributedSourceSegments(
           from: results,
+          diarization: diarization,
+          acceptedSegments: acceptedSegments,
           source: source,
-          activity: prepared.activity
         )
-        guard !acceptedSegments.isEmpty else {
-          continue
-        }
-
-        do {
-          let speakerKit = try await prepareSpeakerKit()
-          let audio = try AudioProcessor.loadAudioAsFloatArray(fromPath: prepared.audioURL.path)
-          let diarization = try await speakerKit.diarize(audioArray: audio)
-          let attributedSegments = TranscriptionPostprocessor.speakerAttributedSourceSegments(
-            from: results,
-            diarization: diarization,
-            acceptedSegments: acceptedSegments,
-            source: source
-          )
-          if diarization.speakerCount > 0,
-            attributedSegments.contains(where: { $0.speakerID != nil })
-          {
-            segments.append(contentsOf: attributedSegments)
-          } else {
-            segments.append(contentsOf: acceptedSegments)
-            appendSpeakerFallbackWarning(for: source.kind, to: &warnings)
-          }
-        } catch {
+        if diarization.speakerCount > 0,
+          attributedSegments.contains(where: { $0.speakerID != nil })
+        {
+          segments.append(contentsOf: attributedSegments)
+        } else {
           segments.append(contentsOf: acceptedSegments)
           appendSpeakerFallbackWarning(for: source.kind, to: &warnings)
         }
-
-        for result in results {
-          let wordCount = max(1, Self.normalize(result.text).split(separator: " ").count)
-          languageWeights[result.language, default: 0] += wordCount
-        }
+      } catch {
+        segments.append(contentsOf: acceptedSegments)
+        appendSpeakerFallbackWarning(for: source.kind, to: &warnings)
       }
 
-      let mergedSegments = TranscriptionPostprocessor.mergeAndDeduplicate(segments)
-      let transcript = SpeakerTranscriptFormatter.format(mergedSegments)
-      let language =
-        job.configuration.language.whisperLanguageCode
-        ?? languageWeights.max(by: { $0.value < $1.value })?.key
-      await eventHandler(
-        .completed(
-          recordingID: job.recordingID,
-          transcript: transcript,
-          language: language,
-          modelIdentifier: job.configuration.modelIdentifier,
-          warnings: warnings
-        )
-      )
-    } catch {
-      await eventHandler(.failed(recordingID: job.recordingID, message: error.localizedDescription))
+      for result in results {
+        let wordCount = max(1, Self.normalize(result.text).split(separator: " ").count)
+        languageWeights[result.language, default: 0] += wordCount
+      }
     }
+    _ = await complete(
+      job,
+      segments: segments,
+      languageWeights: languageWeights,
+      warnings: warnings
+    )
+  }
+
+  private func processWithElevenLabs(
+    _ job: TranscriptionJob,
+    sources: [TranscriptionSource]
+  ) async throws {
+    guard let prepared = try elevenLabsAudioPreparer.prepare(sources: sources) else {
+      _ = await complete(job, segments: [], languageWeights: [:], warnings: [])
+      return
+    }
+    defer {
+      prepared.removeTemporaryFiles()
+    }
+
+    var warnings: [String] = []
+    var languageWeights: [String: Int] = [:]
+    let response = try await elevenLabsClient.transcribe(
+      audioURL: prepared.audioURL,
+      configuration: job.configuration
+    )
+    if let transcriptionID = response.transcriptionID {
+      do {
+        try await elevenLabsCleanupQueue.enqueue(
+          transcriptionID: transcriptionID,
+          recordingID: job.recordingID
+        )
+      } catch {
+        warnings.append(
+          "MeetingBar could not queue the ElevenLabs transcript for automatic deletion: \(error.localizedDescription)"
+        )
+      }
+    } else {
+      warnings.append(
+        "ElevenLabs did not return a transcript ID, so MeetingBar could not request automatic deletion."
+      )
+    }
+    let segments = ElevenLabsTranscriptSegmentBuilder.segments(
+      from: response,
+      source: prepared.transcriptSource,
+      durationSeconds: prepared.durationSeconds
+    )
+    if let language = response.languageCode {
+      let wordCount = max(1, Self.normalize(response.text).split(separator: " ").count)
+      languageWeights[language, default: 0] += wordCount
+    }
+    let transcriptWasStored = await complete(
+      job,
+      segments: segments,
+      languageWeights: languageWeights,
+      warnings: warnings
+    )
+    if transcriptWasStored {
+      try? await elevenLabsCleanupQueue.confirmLocalTranscriptStored(
+        recordingID: job.recordingID
+      )
+    }
+  }
+
+  private func complete(
+    _ job: TranscriptionJob,
+    segments: [SourceTranscriptSegment],
+    languageWeights: [String: Int],
+    warnings: [String]
+  ) async -> Bool {
+    let mergedSegments = TranscriptionPostprocessor.mergeAndDeduplicate(segments)
+    let transcript = SpeakerTranscriptFormatter.format(mergedSegments)
+    let language =
+      job.configuration.language.whisperLanguageCode
+      ?? languageWeights.max(by: { $0.value < $1.value })?.key
+    return await eventHandler(
+      .completed(
+        recordingID: job.recordingID,
+        transcript: transcript,
+        language: language,
+        provider: job.configuration.provider,
+        modelIdentifier: job.configuration.modelIdentifier,
+        warnings: warnings
+      )
+    )
   }
 
   private func performModelPreparation(identifier: String) async {
@@ -283,7 +414,7 @@ actor TranscriptionQueue {
       loadedModelIdentifier = identifier
       modelPreparationError = nil
       modelPreparationTask = nil
-      await eventHandler(.modelReady(modelIdentifier: identifier))
+      _ = await eventHandler(.modelReady(modelIdentifier: identifier))
     } catch {
       modelPreparationError = .modelUnavailable(error.localizedDescription)
       modelPreparationTask = nil
@@ -308,7 +439,7 @@ actor TranscriptionQueue {
       load: false,
       verbose: false
     )
-    await eventHandler(.speakerModelPreparing)
+    _ = await eventHandler(.speakerModelPreparing)
     let task = Task {
       try await SpeakerKit(configuration)
     }
@@ -318,11 +449,11 @@ actor TranscriptionQueue {
       let prepared = try await task.value
       speakerKit = prepared
       speakerPreparationTask = nil
-      await eventHandler(.speakerModelReady)
+      _ = await eventHandler(.speakerModelReady)
       return prepared
     } catch {
       speakerPreparationTask = nil
-      await eventHandler(.speakerModelFailed(error.localizedDescription))
+      _ = await eventHandler(.speakerModelFailed(error.localizedDescription))
       throw error
     }
   }

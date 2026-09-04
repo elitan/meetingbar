@@ -84,8 +84,8 @@ final class RecordingRecoveryService {
     recording.durationSeconds = duration
     recording.status = .queued
     recording.audioRelativePath = fileStore.relativeAudioPath(for: recording.id)
-    recording.audioExpiresAt = recording.endedAt?.addingTimeInterval(
-      RetentionService.retentionInterval)
+    recording.audioExpiresAt = nil
+    recording.audioDeletedAt = nil
     recording.wasRecovered = true
     recording.errorMessage = nil
     recording.updatedAt = now

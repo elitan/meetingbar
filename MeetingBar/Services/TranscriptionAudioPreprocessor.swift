@@ -208,6 +208,111 @@ final class PCM16WAVReader {
   }
 }
 
+enum AlignedPCM16AudioMixer {
+  static let chunkSize = 32_768
+
+  @discardableResult
+  static func write(
+    preparedSources: [PreparedTranscriptionAudio],
+    partialURL: URL,
+    finalURL: URL,
+    fileManager: FileManager = .default
+  ) throws -> UInt64 {
+    precondition(!preparedSources.isEmpty)
+    try? fileManager.removeItem(at: partialURL)
+
+    do {
+      let tracks = try preparedSources.map(AlignedPCM16TrackReader.init)
+      let writer = try PCM16WAVWriter(
+        partialURL: partialURL,
+        finalURL: finalURL,
+        fileManager: fileManager
+      )
+      while true {
+        try Task.checkCancellation()
+        let chunks = try tracks.map { try $0.read(maxCount: chunkSize) }
+        let validSampleCount = chunks.map(\.validSampleCount).max() ?? 0
+        guard validSampleCount > 0 else {
+          break
+        }
+
+        var mixed = [Float](repeating: 0, count: validSampleCount)
+        for index in 0..<validSampleCount {
+          var sum: Float = 0
+          var activeTrackCount = 0
+          for chunk in chunks where index < chunk.samples.count {
+            let sample = chunk.samples[index]
+            sum += sample
+            if abs(sample) > 0.000_001 {
+              activeTrackCount += 1
+            }
+          }
+          if activeTrackCount > 1 {
+            sum /= sqrt(Float(activeTrackCount))
+          }
+          mixed[index] = softLimit(sum)
+        }
+        try writer.append(floatSamples: mixed)
+      }
+      let sampleCount = writer.sampleCount
+      _ = try writer.finish(fileManager: fileManager)
+      return sampleCount
+    } catch {
+      try? fileManager.removeItem(at: partialURL)
+      throw error
+    }
+  }
+
+  private static func softLimit(_ sample: Float) -> Float {
+    let magnitude = abs(sample)
+    guard magnitude > 0.85 else {
+      return sample
+    }
+    let compressed = 0.85 + 0.13 * (1 - exp(-(magnitude - 0.85) / 0.13))
+    return sample.sign == .minus ? -compressed : compressed
+  }
+}
+
+final class AlignedPCM16TrackReader {
+  private let reader: PCM16WAVReader
+  private var remainingOffsetSamples: Int
+  private var exhausted = false
+
+  init(prepared: PreparedTranscriptionAudio) throws {
+    reader = try PCM16WAVReader(url: prepared.audioURL)
+    remainingOffsetSamples = max(
+      0,
+      Int((prepared.source.offsetSeconds * Double(PCM16WAVWriter.sampleRate)).rounded())
+    )
+  }
+
+  func read(maxCount: Int) throws -> AlignedPCM16TrackChunk {
+    guard !exhausted || remainingOffsetSamples > 0 else {
+      return AlignedPCM16TrackChunk(samples: [], validSampleCount: 0)
+    }
+
+    let leadingSilenceCount = min(remainingOffsetSamples, maxCount)
+    remainingOffsetSamples -= leadingSilenceCount
+    var samples = [Float](repeating: 0, count: leadingSilenceCount)
+
+    if samples.count < maxCount, !exhausted {
+      let requestedCount = maxCount - samples.count
+      if let sourceSamples = try reader.readSamples(maxCount: requestedCount) {
+        samples.append(contentsOf: sourceSamples.map { Float($0) / 32_768 })
+      } else {
+        exhausted = true
+      }
+    }
+
+    return AlignedPCM16TrackChunk(samples: samples, validSampleCount: samples.count)
+  }
+}
+
+struct AlignedPCM16TrackChunk {
+  let samples: [Float]
+  let validSampleCount: Int
+}
+
 extension Data {
   fileprivate func uint16LittleEndian(at offset: Int) -> UInt16? {
     guard offset >= 0, offset + 2 <= count else {

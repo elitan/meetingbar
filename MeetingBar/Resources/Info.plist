@@ -27,8 +27,8 @@
 	<key>NSHumanReadableCopyright</key>
 	<string>Copyright © 2026 Johan Eliasson</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>MeetingBar records your microphone so in-person and online meetings can be transcribed on this Mac.</string>
+	<string>MeetingBar records your microphone so in-person and online meetings can be transcribed with your selected provider.</string>
 	<key>NSScreenCaptureUsageDescription</key>
-	<string>MeetingBar captures system audio from calls so meetings can be transcribed on this Mac. It never saves video.</string>
+	<string>MeetingBar captures system audio from calls so meetings can be transcribed with your selected provider. It never saves video.</string>
 </dict>
 </plist>

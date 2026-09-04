@@ -47,6 +47,7 @@ final class AudioCaptureController {
 
   var onWarning: ((String) -> Void)?
   var onFatalFailure: ((Error) -> Void)?
+  var onLevelsChanged: ((CaptureLevels) -> Void)?
 
   private let fileStore: RecordingFileStore
   private let microphonePreferences: MicrophonePreferenceStore
@@ -139,6 +140,7 @@ final class AudioCaptureController {
         },
         levelsHandler: { [weak self] levels in
           self?.levels = levels
+          self?.onLevelsChanged?(levels)
         }
       )
       let output = CaptureStreamOutput(processor: processor)

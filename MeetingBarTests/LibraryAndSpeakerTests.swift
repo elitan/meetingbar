@@ -18,6 +18,35 @@ final class LibraryAndSpeakerTests: XCTestCase {
     XCTAssertTrue(fetched[0].isPinned)
   }
 
+  func testRecordingKeepsCloudTranscriptionProvenance() throws {
+    let configuration = ModelConfiguration(isStoredInMemoryOnly: true)
+    let container = try ModelContainer(for: Recording.self, configurations: configuration)
+    let recording = Recording(
+      title: "Cloud meeting",
+      transcriptionProvider: .elevenLabs,
+      modelIdentifier: ElevenLabsTranscriptionModel.scribeV2.modelIdentifier
+    )
+    container.mainContext.insert(recording)
+    try container.mainContext.save()
+
+    let fetched = try XCTUnwrap(
+      container.mainContext.fetch(FetchDescriptor<Recording>()).first
+    )
+
+    XCTAssertEqual(fetched.transcriptionProvider, .elevenLabs)
+    XCTAssertEqual(fetched.transcriptionEngineLabel, "ElevenLabs · Scribe v2")
+  }
+
+  func testOldRecordingModelWithoutProviderIsTreatedAsOnDevice() {
+    let recording = Recording(
+      title: "Existing meeting",
+      modelIdentifier: TranscriptionQuality.bestAccuracy.modelIdentifier
+    )
+
+    XCTAssertEqual(recording.transcriptionProvider, .onDevice)
+    XCTAssertEqual(recording.transcriptionEngineLabel, "On this Mac · Best accuracy")
+  }
+
   func testSpeakerFormatterNumbersSpeakersByFirstAppearance() {
     let transcript = SpeakerTranscriptFormatter.format([
       segment(source: .system, start: 0, text: "Hello", speakerID: 7),

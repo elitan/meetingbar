@@ -250,6 +250,7 @@ final class RealModelIntegrationTests: XCTestCase {
       modelsURL: URL(filePath: modelsRoot, directoryHint: .isDirectory)
     ) { event in
       recorder.handle(event)
+      return true
     }
     let quality: TranscriptionQuality =
       modelIdentifier == TranscriptionQuality.compact.modelIdentifier ? .compact : .bestAccuracy
@@ -370,7 +371,7 @@ private final class PipelineEventRecorder {
 
   func handle(_ event: TranscriptionQueueEvent) {
     switch event {
-    case .completed(_, let transcript, let language, _, let warnings):
+    case .completed(_, let transcript, let language, _, _, let warnings):
       self.transcript = transcript
       self.language = language
       self.warnings = warnings

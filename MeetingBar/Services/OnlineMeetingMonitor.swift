@@ -169,7 +169,10 @@ struct OnlineMeetingReminderStateMachine {
 @MainActor
 final class OnlineMeetingMonitor {
   var onMeetingDetected: ((OnlineMeetingApplication) -> Void)?
+  var onActiveApplicationsChanged: ((Set<OnlineMeetingApplication>) -> Void)?
   var onErrorChanged: ((String?) -> Void)?
+
+  private(set) var activeApplications: Set<OnlineMeetingApplication> = []
 
   private enum Snapshot: Sendable {
     case success([ActiveAudioInputProcess])
@@ -215,6 +218,7 @@ final class OnlineMeetingMonitor {
     pollingTask?.cancel()
     pollingTask = nil
     stateMachine.reset()
+    activeApplications = []
     lastReportedFailure = nil
   }
 
@@ -224,6 +228,7 @@ final class OnlineMeetingMonitor {
     }
     self.includesBrowsers = includesBrowsers
     stateMachine.reset()
+    activeApplications = []
   }
 
   private func poll() async {
@@ -246,6 +251,10 @@ final class OnlineMeetingMonitor {
         for: processes,
         includesBrowsers: includesBrowsers
       )
+      if applications != activeApplications {
+        activeApplications = applications
+        onActiveApplicationsChanged?(applications)
+      }
       for application in stateMachine.update(activeApplications: applications, now: .now) {
         onMeetingDetected?(application)
       }

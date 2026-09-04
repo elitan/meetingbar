@@ -140,6 +140,101 @@ final class OnlineMeetingReminderTests: XCTestCase {
     )
   }
 
+  func testMeetingEndPromptsAfterOneMinuteAndStopsAfterCountdown() throws {
+    var monitor = OnlineMeetingEndMonitor()
+    let zoom = try XCTUnwrap(application(bundleID: "us.zoom.xos"))
+    let start = ContinuousClock.now
+    monitor.start(activeApplications: [zoom])
+
+    XCTAssertEqual(
+      monitor.observe(activeApplications: [], at: start + .seconds(10)),
+      .none
+    )
+    XCTAssertEqual(monitor.tick(at: start + .seconds(69)), .none)
+    XCTAssertEqual(
+      monitor.tick(at: start + .seconds(70)),
+      .presentPrompt(applicationName: "Zoom", secondsRemaining: 30)
+    )
+    XCTAssertEqual(
+      monitor.tick(at: start + .seconds(71)),
+      .updatePrompt(applicationName: "Zoom", secondsRemaining: 29)
+    )
+    XCTAssertEqual(
+      monitor.tick(at: start + .seconds(100)),
+      .stopRecording(applicationName: "Zoom")
+    )
+  }
+
+  func testMeetingResumingDismissesCountdownAndStartsANewEndWindow() throws {
+    var monitor = OnlineMeetingEndMonitor()
+    let teams = try XCTUnwrap(application(bundleID: "com.microsoft.teams2"))
+    let start = ContinuousClock.now
+    monitor.start(activeApplications: [teams])
+    _ = monitor.observe(activeApplications: [], at: start)
+    _ = monitor.tick(at: start + .seconds(60))
+
+    XCTAssertEqual(
+      monitor.observe(activeApplications: [teams], at: start + .seconds(65)),
+      .dismissPrompt
+    )
+    _ = monitor.observe(activeApplications: [], at: start + .seconds(70))
+    XCTAssertEqual(monitor.tick(at: start + .seconds(129)), .none)
+    XCTAssertEqual(
+      monitor.tick(at: start + .seconds(130)),
+      .presentPrompt(applicationName: "Microsoft Teams", secondsRemaining: 30)
+    )
+  }
+
+  func testKeepRecordingSuppressesRepeatUntilAnotherMeetingSession() throws {
+    var monitor = OnlineMeetingEndMonitor()
+    let zoom = try XCTUnwrap(application(bundleID: "us.zoom.xos"))
+    let start = ContinuousClock.now
+    monitor.start(activeApplications: [zoom])
+    _ = monitor.observe(activeApplications: [], at: start)
+    _ = monitor.tick(at: start + .seconds(60))
+
+    XCTAssertEqual(monitor.keepRecording(), .dismissPrompt)
+    XCTAssertEqual(monitor.tick(at: start + .seconds(600)), .none)
+    XCTAssertEqual(
+      monitor.observe(activeApplications: [], at: start + .seconds(601)),
+      .none
+    )
+
+    _ = monitor.observe(activeApplications: [zoom], at: start + .seconds(602))
+    _ = monitor.observe(activeApplications: [], at: start + .seconds(603))
+    XCTAssertEqual(
+      monitor.tick(at: start + .seconds(663)),
+      .presentPrompt(applicationName: "Zoom", secondsRemaining: 30)
+    )
+  }
+
+  func testManualRecordingWithoutMeetingActivityDoesNotArmCallEndedPrompt() {
+    var monitor = OnlineMeetingEndMonitor()
+    let start = ContinuousClock.now
+    monitor.start(activeApplications: [])
+
+    XCTAssertEqual(
+      monitor.observe(activeApplications: [], at: start + .seconds(10)),
+      .none
+    )
+    XCTAssertEqual(monitor.tick(at: start + .seconds(600)), .none)
+  }
+
+  func testMeetingEndedBannerUsesApplicationNameAndCountdownGrammar() {
+    XCTAssertTrue(
+      OnlineMeetingEndedBannerText.message(
+        applicationName: "Zoom",
+        secondsRemaining: 30
+      ).contains("Zoom")
+    )
+    XCTAssertTrue(
+      OnlineMeetingEndedBannerText.message(
+        applicationName: "Zoom",
+        secondsRemaining: 1
+      ).hasSuffix("1 second.")
+    )
+  }
+
   func testPreferencesDefaultOnAndPersist() {
     let (defaults, suiteName) = makeDefaults()
     defer { defaults.removePersistentDomain(forName: suiteName) }

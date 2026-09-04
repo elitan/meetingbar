@@ -53,14 +53,14 @@ final class AudioCaptureProcessor {
       case .audio:
         let converted = try systemConverter.convert(sampleBuffer)
         appendSource(converted, to: &systemWriter, kind: .system)
-        levels.system = peakLevel(converted.samples)
+        levels.system = rootMeanSquareLevel(converted.samples)
         mixer.appendSystem(converted.samples)
         drainSystemIfMicrophoneUnavailable()
       case .microphone:
         let converted = try microphoneConverter.convert(sampleBuffer)
         appendSource(converted, to: &microphoneWriter, kind: .microphone)
         lastMicrophoneSampleAt = .now
-        levels.microphone = peakLevel(converted.samples)
+        levels.microphone = rootMeanSquareLevel(converted.samples)
         try mixedWriter.append(floatSamples: mixer.mixMicrophone(converted.samples))
       case .screen:
         return
@@ -132,10 +132,14 @@ final class AudioCaptureProcessor {
     }
   }
 
-  private func peakLevel(_ samples: [Float]) -> Float {
-    samples.reduce(0) { current, sample in
-      max(current, abs(sample))
+  private func rootMeanSquareLevel(_ samples: [Float]) -> Float {
+    guard !samples.isEmpty else {
+      return 0
     }
+    let sumOfSquares = samples.reduce(0.0) { total, sample in
+      total + Double(sample) * Double(sample)
+    }
+    return Float(sqrt(sumOfSquares / Double(samples.count)))
   }
 
   private func appendSource(

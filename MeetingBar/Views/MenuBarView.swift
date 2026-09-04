@@ -9,7 +9,7 @@ struct MenuBarStatusLabel: View {
     HStack(spacing: 4) {
       Image(systemName: controller.capture.state.isRecording ? "record.circle.fill" : "waveform")
         .symbolRenderingMode(.hierarchical)
-        .foregroundStyle(controller.capture.state.isRecording ? .red : .primary)
+        .foregroundStyle(controller.capture.state.isRecording ? MeetingBarTheme.coral : .primary)
       if controller.capture.state.isRecording {
         Text(DurationText.string(seconds: controller.capture.elapsedSeconds))
           .monospacedDigit()
@@ -17,7 +17,10 @@ struct MenuBarStatusLabel: View {
     }
     .task {
       await controller.launch()
-      if !controller.onboardingComplete {
+      if ProcessInfo.processInfo.arguments.contains("--open-library") {
+        openWindow(id: "library")
+        NSApplication.shared.activate(ignoringOtherApps: true)
+      } else if !controller.onboardingComplete {
         openWindow(id: "onboarding")
         NSApplication.shared.activate(ignoringOtherApps: true)
       }
@@ -31,24 +34,133 @@ struct MenuBarView: View {
   let controller: AppController
 
   var body: some View {
-    if controller.capture.state.isRecording {
-      Text("Recording · \(DurationText.string(seconds: controller.capture.elapsedSeconds))")
-        .foregroundStyle(.red)
-    } else if controller.capture.state == .starting {
-      Text("Starting…")
-    } else if controller.capture.state == .stopping {
-      Text("Stopping…")
-    } else {
-      Text("Ready")
-    }
+    ZStack {
+      MeetingBarBackdrop()
 
-    Button(controller.capture.state.isRecording ? "Stop Recording" : "Start Recording") {
-      Task {
-        await controller.toggleRecording()
+      VStack(spacing: 0) {
+        popoverHeader
+          .padding(.horizontal, 16)
+          .padding(.top, 15)
+          .padding(.bottom, 13)
+
+        Divider()
+          .opacity(0.55)
+
+        VStack(spacing: 13) {
+          recordingCard
+          microphonePicker
+
+          if let warning = controller.capture.latestWarning,
+            controller.capture.state.isRecording
+          {
+            compactMessage(
+              warning,
+              symbol: "exclamationmark.triangle.fill",
+              color: MeetingBarTheme.amber
+            )
+          }
+
+          if let error = controller.lastErrorMessage {
+            compactMessage(
+              error,
+              symbol: "xmark.octagon.fill",
+              color: MeetingBarTheme.coral,
+              canDismiss: true
+            )
+          }
+        }
+        .padding(14)
+
+        Divider()
+          .opacity(0.55)
+
+        popoverFooter
+          .padding(10)
       }
     }
-    .disabled(controller.capture.state == .starting || controller.capture.state == .stopping)
+    .frame(width: 342)
+    .fixedSize(horizontal: false, vertical: true)
+    .meetingBarWindowTint()
+  }
 
+  private var popoverHeader: some View {
+    HStack(spacing: 10) {
+      MeetingBarLogo(size: 34)
+      VStack(alignment: .leading, spacing: 1) {
+        Text("MeetingBar")
+          .font(.headline)
+        Text(statusText)
+          .font(.caption)
+          .foregroundStyle(statusColor)
+      }
+      Spacer()
+      Button {
+        openSettingsWindow()
+      } label: {
+        Image(systemName: "gearshape")
+          .font(.system(size: 14, weight: .semibold))
+          .foregroundStyle(.secondary)
+          .frame(width: 30, height: 30)
+          .background(MeetingBarTheme.quietFill, in: RoundedRectangle(cornerRadius: 9))
+      }
+      .buttonStyle(.plain)
+      .help("Settings")
+    }
+  }
+
+  private var recordingCard: some View {
+    VStack(spacing: 14) {
+      HStack {
+        HStack(spacing: 7) {
+          Circle()
+            .fill(statusColor)
+            .frame(width: 7, height: 7)
+            .shadow(color: statusColor.opacity(0.40), radius: 4)
+          Text(controller.capture.state.isRecording ? "Recording now" : "Ready to record")
+            .font(.subheadline.weight(.semibold))
+        }
+        Spacer()
+        Text(
+          controller.capture.state.isRecording
+            ? DurationText.string(seconds: controller.capture.elapsedSeconds)
+            : "MIC + MAC"
+        )
+        .font(.caption.monospacedDigit().weight(.semibold))
+        .foregroundStyle(.secondary)
+      }
+
+      MeetingBarAudioMeter(
+        microphoneLevel: controller.capture.levels.microphone,
+        systemLevel: controller.capture.levels.system,
+        barCount: 28,
+        color: controller.capture.state.isRecording
+          ? MeetingBarTheme.coral
+          : MeetingBarTheme.accent
+      )
+      .frame(height: 42)
+
+      Button {
+        Task {
+          await controller.toggleRecording()
+        }
+      } label: {
+        Label(recordingButtonTitle, systemImage: recordingButtonSymbol)
+      }
+      .buttonStyle(
+        MeetingBarPrimaryButtonStyle(isRecording: controller.capture.state.isRecording)
+      )
+      .disabled(controller.capture.state == .starting || controller.capture.state == .stopping)
+      .keyboardShortcut(.return, modifiers: [])
+    }
+    .padding(15)
+    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+    .overlay {
+      RoundedRectangle(cornerRadius: 17, style: .continuous)
+        .stroke(statusColor.opacity(controller.capture.state.isRecording ? 0.24 : 0.11), lineWidth: 1)
+    }
+  }
+
+  private var microphonePicker: some View {
     Menu {
       if controller.microphonePreferences.connectedMicrophones.isEmpty {
         Text("No microphone connected")
@@ -69,56 +181,151 @@ struct MenuBarView: View {
       if !controller.microphonePreferences.unavailableMicrophones.isEmpty {
         Divider()
         Text(
-          "\(controller.microphonePreferences.unavailableMicrophones.count) unavailable microphone\(controller.microphonePreferences.unavailableMicrophones.count == 1 ? "" : "s") remembered"
+          "\(controller.microphonePreferences.unavailableMicrophones.count) remembered but unavailable"
         )
       }
 
       Divider()
       Button("Manage Microphone Priority…") {
-        openSettings()
-        NSApplication.shared.activate(ignoringOtherApps: true)
+        openSettingsWindow()
       }
     } label: {
-      Label("Microphone: \(displayedMicrophoneName)", systemImage: "mic")
-    }
-
-    if let warning = controller.capture.latestWarning, controller.capture.state.isRecording {
-      Text(warning)
-    }
-
-    if let error = controller.lastErrorMessage {
-      Divider()
-      Text(error)
-      Button("Dismiss Error") {
-        controller.clearError()
+      HStack(spacing: 10) {
+        MeetingBarIconTile(symbol: "mic.fill", color: MeetingBarTheme.mint, size: 34)
+        VStack(alignment: .leading, spacing: 1) {
+          Text("Input microphone")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+          Text(displayedMicrophoneName)
+            .font(.subheadline.weight(.medium))
+            .lineLimit(1)
+        }
+        Spacer()
+        Image(systemName: "chevron.up.chevron.down")
+          .font(.caption2.weight(.bold))
+          .foregroundStyle(.tertiary)
+      }
+      .padding(10)
+      .background(MeetingBarTheme.quietFill, in: RoundedRectangle(cornerRadius: 12))
+      .overlay {
+        RoundedRectangle(cornerRadius: 12)
+          .stroke(MeetingBarTheme.subtleBorder, lineWidth: 1)
       }
     }
+    .buttonStyle(.plain)
+  }
 
-    Divider()
-
-    Button("Open Library") {
-      openWindow(id: "library")
-      NSApplication.shared.activate(ignoringOtherApps: true)
-    }
-
-    Button("Settings…") {
-      openSettings()
-      NSApplication.shared.activate(ignoringOtherApps: true)
-    }
-
-    Divider()
-
-    Button("Quit MeetingBar") {
-      Task {
-        await controller.quit()
+  private var popoverFooter: some View {
+    HStack(spacing: 6) {
+      Button {
+        openWindow(id: "library")
+        NSApplication.shared.activate(ignoringOtherApps: true)
+      } label: {
+        Label("Library", systemImage: "rectangle.stack")
       }
+
+      Button {
+        openSettingsWindow()
+      } label: {
+        Label("Settings", systemImage: "slider.horizontal.3")
+      }
+
+      Spacer()
+
+      Button {
+        Task {
+          await controller.quit()
+        }
+      } label: {
+        Image(systemName: "power")
+      }
+      .help("Quit MeetingBar")
     }
+    .buttonStyle(.borderless)
+    .font(.subheadline)
+  }
+
+  private var statusText: String {
+    switch controller.capture.state {
+    case .idle:
+      controller.transcriptionPreferences.provider == .onDevice
+        ? "Private · on this Mac"
+        : "Transcription · ElevenLabs"
+    case .starting:
+      "Starting capture…"
+    case .recording:
+      "Microphone and Mac audio"
+    case .stopping:
+      "Saving recording…"
+    }
+  }
+
+  private var statusColor: Color {
+    switch controller.capture.state {
+    case .recording:
+      MeetingBarTheme.coral
+    case .starting, .stopping:
+      MeetingBarTheme.amber
+    case .idle:
+      MeetingBarTheme.mint
+    }
+  }
+
+  private var recordingButtonTitle: String {
+    switch controller.capture.state {
+    case .idle:
+      "Start Recording"
+    case .starting:
+      "Starting…"
+    case .recording:
+      "Stop & Transcribe"
+    case .stopping:
+      "Saving…"
+    }
+  }
+
+  private var recordingButtonSymbol: String {
+    controller.capture.state.isRecording ? "stop.fill" : "record.circle"
   }
 
   private var displayedMicrophoneName: String {
     if let activeMicrophoneName = controller.capture.activeMicrophoneName {
       return activeMicrophoneName
     }
-    return controller.microphonePreferences.activeMicrophone?.name ?? "None"
+    return controller.microphonePreferences.activeMicrophone?.name ?? "No microphone"
+  }
+
+  @ViewBuilder
+  private func compactMessage(
+    _ message: String,
+    symbol: String,
+    color: Color,
+    canDismiss: Bool = false
+  ) -> some View {
+    HStack(alignment: .top, spacing: 9) {
+      Image(systemName: symbol)
+        .foregroundStyle(color)
+      Text(message)
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+      Spacer(minLength: 2)
+      if canDismiss {
+        Button {
+          controller.clearError()
+        } label: {
+          Image(systemName: "xmark")
+            .font(.caption2.weight(.bold))
+        }
+        .buttonStyle(.plain)
+      }
+    }
+    .padding(10)
+    .background(color.opacity(0.08), in: RoundedRectangle(cornerRadius: 11))
+  }
+
+  private func openSettingsWindow() {
+    openSettings()
+    NSApplication.shared.activate(ignoringOtherApps: true)
   }
 }
