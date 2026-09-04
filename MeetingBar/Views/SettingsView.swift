@@ -287,7 +287,7 @@ struct SettingsView: View {
     if controller.transcriptionPreferences.provider == .elevenLabs {
       SettingsCard(
         title: "ElevenLabs API key",
-        subtitle: "Stored in macOS Keychain and never written to MeetingBar's database.",
+        subtitle: "Stored only in MeetingBar's private local app data, never in its database or app bundle.",
         symbol: "key.fill"
       ) {
         HStack(spacing: 10) {
@@ -308,13 +308,18 @@ struct SettingsView: View {
 
         HStack(spacing: 10) {
           if controller.transcriptionPreferences.hasElevenLabsAPIKey {
-            MeetingBarPill(text: "Saved in Keychain", symbol: "checkmark", tone: .success)
+            MeetingBarPill(text: "Saved locally", symbol: "checkmark", tone: .success)
             Button("Remove Key", role: .destructive) {
               removeElevenLabsAPIKey()
             }
             .controlSize(.small)
           } else {
-            Label("An API key is required before cloud transcription can run.", systemImage: "key")
+            Label(
+              controller.transcriptionPreferences.needsElevenLabsAPIKeyResave
+                ? "Paste your key once more. MeetingBar no longer reads the old Keychain entry, which removes the recurring password prompt."
+                : "An API key is required before cloud transcription can run.",
+              systemImage: "key"
+            )
               .font(.caption)
               .foregroundStyle(.secondary)
           }
@@ -451,7 +456,7 @@ struct SettingsView: View {
     do {
       try controller.removeElevenLabsAPIKey()
       elevenLabsAPIKey = ""
-      apiKeyFeedback = .success("API key removed from Keychain.")
+      apiKeyFeedback = .success("API key removed from this Mac.")
     } catch {
       apiKeyFeedback = .failure(error.localizedDescription)
     }

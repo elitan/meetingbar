@@ -79,10 +79,12 @@ final class AppController {
   init(
     modelContext: ModelContext,
     fileStore: RecordingFileStore,
-    transcriptionSecretStore: any TranscriptionSecretStoring = KeychainTranscriptionSecretStore()
+    transcriptionSecretStore: (any TranscriptionSecretStoring)? = nil
   ) {
     self.modelContext = modelContext
     self.fileStore = fileStore
+    let transcriptionSecretStore =
+      transcriptionSecretStore ?? LocalTranscriptionSecretStore(rootURL: fileStore.rootURL)
     let microphonePreferences = MicrophonePreferenceStore()
     self.microphonePreferences = microphonePreferences
     meetingReminderPreferences = MeetingReminderPreferenceStore()

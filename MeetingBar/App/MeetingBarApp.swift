@@ -64,15 +64,16 @@ struct MeetingBarApp: App {
 
     do {
       let container = try ModelContainer(for: Recording.self)
+      let fileStore = try RecordingFileStore()
       modelContainer = container
       let secretStore: any TranscriptionSecretStoring =
         isRunningTests
         ? EmptyTranscriptionSecretStore()
-        : KeychainTranscriptionSecretStore()
+        : LocalTranscriptionSecretStore(rootURL: fileStore.rootURL)
       _controller = State(
-        initialValue: try AppController(
+        initialValue: AppController(
           modelContext: container.mainContext,
-          fileStore: RecordingFileStore(),
+          fileStore: fileStore,
           transcriptionSecretStore: secretStore
         )
       )

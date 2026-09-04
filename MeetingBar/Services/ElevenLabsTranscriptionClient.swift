@@ -96,7 +96,7 @@ struct ElevenLabsTranscriptionClient: Sendable {
 
   init(
     endpoint: URL = URL(string: "https://api.elevenlabs.io/v1/speech-to-text")!,
-    secretStore: any TranscriptionSecretStoring = KeychainTranscriptionSecretStore(),
+    secretStore: any TranscriptionSecretStoring,
     transport: any ElevenLabsHTTPTransport = URLSessionElevenLabsHTTPTransport(),
     temporaryDirectory: URL = FileManager.default.temporaryDirectory
   ) {

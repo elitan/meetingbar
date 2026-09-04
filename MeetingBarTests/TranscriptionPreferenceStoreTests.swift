@@ -20,13 +20,14 @@ final class TranscriptionPreferenceStoreTests: XCTestCase {
     XCTAssertFalse(store.hasElevenLabsAPIKey)
   }
 
-  func testInitializationNeverReadsKeychainBeforeTheAppIsReady() {
+  func testLegacyKeychainFlagRequestsOneTimeLocalResaveWithoutReadingKeychain() {
     let fixture = makeDefaults()
     defer { fixture.defaults.removePersistentDomain(forName: fixture.suiteName) }
     fixture.defaults.set(
       TranscriptionProvider.elevenLabs.rawValue,
       forKey: "TranscriptionProvider"
     )
+    fixture.defaults.set(true, forKey: "HasElevenLabsAPIKey")
     let secrets = TranscriptionSecretStoreSpy()
 
     let store = TranscriptionPreferenceStore(
@@ -34,8 +35,36 @@ final class TranscriptionPreferenceStoreTests: XCTestCase {
       secretStore: secrets
     )
 
-    XCTAssertTrue(store.hasElevenLabsAPIKey)
+    XCTAssertFalse(store.hasElevenLabsAPIKey)
+    XCTAssertTrue(store.needsElevenLabsAPIKeyResave)
     XCTAssertEqual(secrets.readCount, 0)
+  }
+
+  func testLocalSecretStoreRoundTripsWithPrivatePermissions() throws {
+    let rootURL = FileManager.default.temporaryDirectory.appending(
+      path: "MeetingBarCredentialTests-\(UUID().uuidString)",
+      directoryHint: .isDirectory
+    )
+    defer { try? FileManager.default.removeItem(at: rootURL) }
+    let store = LocalTranscriptionSecretStore(rootURL: rootURL)
+
+    try store.saveSecret("  test-secret  ", for: .elevenLabs)
+
+    XCTAssertEqual(try store.secret(for: .elevenLabs), "test-secret")
+    let credentialsURL = rootURL.appending(path: "Credentials", directoryHint: .isDirectory)
+    let credentialURL = credentialsURL.appending(path: "elevenlabs-api-key")
+    let directoryAttributes = try FileManager.default.attributesOfItem(
+      atPath: credentialsURL.path
+    )
+    let fileAttributes = try FileManager.default.attributesOfItem(atPath: credentialURL.path)
+    XCTAssertEqual(
+      (directoryAttributes[.posixPermissions] as? NSNumber)?.intValue,
+      0o700
+    )
+    XCTAssertEqual((fileAttributes[.posixPermissions] as? NSNumber)?.intValue, 0o600)
+
+    try store.removeSecret(for: .elevenLabs)
+    XCTAssertNil(try store.secret(for: .elevenLabs))
   }
 
   func testProviderLanguageAndModelsPersistAcrossRelaunch() {

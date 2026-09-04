@@ -66,7 +66,7 @@ actor TranscriptionQueue {
 
   init(
     modelsURL: URL,
-    secretStore: any TranscriptionSecretStoring = KeychainTranscriptionSecretStore(),
+    secretStore: any TranscriptionSecretStoring,
     elevenLabsTransport: any ElevenLabsHTTPTransport = URLSessionElevenLabsHTTPTransport(),
     elevenLabsCleanupURL: URL? = nil,
     eventHandler: @escaping @MainActor @Sendable (TranscriptionQueueEvent) -> Bool

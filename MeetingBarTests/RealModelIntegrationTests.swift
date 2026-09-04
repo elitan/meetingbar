@@ -247,7 +247,8 @@ final class RealModelIntegrationTests: XCTestCase {
     let completion = expectation(description: "Complete transcription with speaker labels")
     let recorder = PipelineEventRecorder(completion: completion)
     let queue = TranscriptionQueue(
-      modelsURL: URL(filePath: modelsRoot, directoryHint: .isDirectory)
+      modelsURL: URL(filePath: modelsRoot, directoryHint: .isDirectory),
+      secretStore: EmptyTranscriptionSecretStore()
     ) { event in
       recorder.handle(event)
       return true

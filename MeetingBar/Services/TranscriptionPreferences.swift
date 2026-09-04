@@ -184,6 +184,7 @@ final class TranscriptionPreferenceStore {
   private(set) var quality: TranscriptionQuality
   private(set) var elevenLabsModel: ElevenLabsTranscriptionModel
   private(set) var hasElevenLabsAPIKey: Bool
+  private(set) var needsElevenLabsAPIKeyResave: Bool
 
   @ObservationIgnored private let userDefaults: UserDefaults
   @ObservationIgnored private let secretStore: any TranscriptionSecretStoring
@@ -191,7 +192,8 @@ final class TranscriptionPreferenceStore {
   @ObservationIgnored private let languageKey = "TranscriptionLanguagePreference"
   @ObservationIgnored private let qualityKey = "TranscriptionQuality"
   @ObservationIgnored private let elevenLabsModelKey = "ElevenLabsTranscriptionModel"
-  @ObservationIgnored private let elevenLabsCredentialKey = "HasElevenLabsAPIKey"
+  @ObservationIgnored private let elevenLabsCredentialKey = "HasLocalElevenLabsAPIKey"
+  @ObservationIgnored private let legacyElevenLabsCredentialKey = "HasElevenLabsAPIKey"
 
   var configuration: TranscriptionConfiguration {
     TranscriptionConfiguration(
@@ -204,7 +206,7 @@ final class TranscriptionPreferenceStore {
 
   init(
     userDefaults: UserDefaults = .standard,
-    secretStore: any TranscriptionSecretStoring = KeychainTranscriptionSecretStore()
+    secretStore: any TranscriptionSecretStoring
   ) {
     self.userDefaults = userDefaults
     self.secretStore = secretStore
@@ -225,12 +227,10 @@ final class TranscriptionPreferenceStore {
       ElevenLabsTranscriptionModel(
         rawValue: userDefaults.string(forKey: elevenLabsModelKey) ?? ""
       ) ?? .scribeV2
-    if userDefaults.object(forKey: elevenLabsCredentialKey) == nil {
-      // Migrate existing ElevenLabs users without touching Keychain during app startup.
-      hasElevenLabsAPIKey = storedProvider == .elevenLabs
-    } else {
-      hasElevenLabsAPIKey = userDefaults.bool(forKey: elevenLabsCredentialKey)
-    }
+    let hasLocalCredential = userDefaults.bool(forKey: elevenLabsCredentialKey)
+    hasElevenLabsAPIKey = hasLocalCredential
+    needsElevenLabsAPIKeyResave =
+      !hasLocalCredential && userDefaults.bool(forKey: legacyElevenLabsCredentialKey)
   }
 
   func setProvider(_ provider: TranscriptionProvider) {
@@ -256,13 +256,17 @@ final class TranscriptionPreferenceStore {
   func saveElevenLabsAPIKey(_ apiKey: String) throws {
     try secretStore.saveSecret(apiKey, for: .elevenLabs)
     hasElevenLabsAPIKey = true
+    needsElevenLabsAPIKeyResave = false
     userDefaults.set(true, forKey: elevenLabsCredentialKey)
+    userDefaults.set(false, forKey: legacyElevenLabsCredentialKey)
   }
 
   func removeElevenLabsAPIKey() throws {
     try secretStore.removeSecret(for: .elevenLabs)
     hasElevenLabsAPIKey = false
+    needsElevenLabsAPIKeyResave = false
     userDefaults.set(false, forKey: elevenLabsCredentialKey)
+    userDefaults.set(false, forKey: legacyElevenLabsCredentialKey)
   }
 
   func markElevenLabsAPIKeyUnavailable() {

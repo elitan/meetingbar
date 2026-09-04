@@ -184,7 +184,7 @@ struct OnboardingView: View {
                     HStack {
                       if controller.transcriptionPreferences.hasElevenLabsAPIKey {
                         MeetingBarPill(
-                          text: "Saved in Keychain",
+                          text: "Saved locally",
                           symbol: "checkmark",
                           tone: .success
                         )
