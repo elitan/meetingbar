@@ -5,6 +5,9 @@ struct LibraryView: View {
   @Query(sort: \Recording.startedAt, order: .reverse) private var recordings: [Recording]
   @State private var searchText = ""
   @State private var selectedRecordingID: UUID?
+  @State private var pendingDeletion: Recording?
+  @State private var deletionError: String?
+  @State private var audioPlayback = AudioPlaybackController()
   let controller: AppController
   @Bindable var navigation: MeetingBarNavigation
 
@@ -41,7 +44,12 @@ struct LibraryView: View {
         ZStack {
           MeetingBarBackdrop()
           if let recording = recordings.first(where: { $0.id == selectedRecordingID }) {
-            RecordingDetailView(recording: recording, controller: controller)
+            RecordingDetailView(
+              recording: recording,
+              controller: controller,
+              audioPlayback: audioPlayback,
+              onDelete: { pendingDeletion = recording }
+            )
           } else {
             LibraryWelcomeView(hasRecordings: !recordings.isEmpty, controller: controller)
           }
@@ -57,6 +65,34 @@ struct LibraryView: View {
     }
     .onChange(of: orderedRecordings.map(\.id)) {
       selectFirstRecordingIfNeeded()
+    }
+    .alert(
+      "Delete this meeting?",
+      isPresented: Binding(
+        get: { pendingDeletion != nil },
+        set: { if !$0 { pendingDeletion = nil } }
+      ),
+      presenting: pendingDeletion
+    ) { recording in
+      Button("Cancel", role: .cancel) {}
+      Button("Delete", role: .destructive) {
+        delete(recording)
+      }
+    } message: { recording in
+      Text(
+        "“\(recording.title)” and all of its transcript and audio files will be removed immediately. This cannot be undone."
+      )
+    }
+    .alert(
+      "Meeting could not be deleted",
+      isPresented: Binding(
+        get: { deletionError != nil },
+        set: { if !$0 { deletionError = nil } }
+      )
+    ) {
+      Button("OK") {}
+    } message: {
+      Text(deletionError ?? "Unknown error")
     }
   }
 
@@ -235,11 +271,23 @@ struct LibraryView: View {
       RecordingRow(
         recording: recording,
         controller: controller,
-        isSelected: recording.id == selectedRecordingID
+        isSelected: recording.id == selectedRecordingID,
+        onDelete: { pendingDeletion = recording }
       ) {
         navigation.showLibrary()
         selectedRecordingID = recording.id
       }
+    }
+  }
+
+  private func delete(_ recording: Recording) {
+    do {
+      if selectedRecordingID == recording.id {
+        audioPlayback.unload()
+      }
+      try controller.delete(recording)
+    } catch {
+      deletionError = error.localizedDescription
     }
   }
 
@@ -258,6 +306,7 @@ private struct RecordingRow: View {
   @Bindable var recording: Recording
   let controller: AppController
   let isSelected: Bool
+  let onDelete: () -> Void
   let onSelect: () -> Void
   @State private var isRenaming = false
   @State private var draftTitle = ""
@@ -373,6 +422,9 @@ private struct RecordingRow: View {
       Button("Rename") {
         beginRename()
       }
+      Divider()
+      Button("Delete Meeting…", systemImage: "trash", role: .destructive, action: onDelete)
+        .disabled(recording.isCapturing)
     }
     .accessibilityElement(children: .combine)
     .accessibilityAddTraits(isSelected ? [.isSelected] : [])

@@ -12,6 +12,8 @@ Local transcription detects speakers with SpeakerKit; ElevenLabs uses Scribe dia
 
 Important meetings can be pinned above the chronological library, and titles can be renamed directly in the left list using the pencil action or context menu. A manual title is never replaced by a generated one. When multiple speakers are detected, transcripts are split into turns prefixed with `Speaker 0`, `Speaker 1`, and so on. Single-speaker transcripts remain plain text. Speaker numbers are local to each meeting and assigned by first appearance.
 
+Right-click any meeting in the left list and choose **Delete Meeting…** to remove it without scrolling through its transcript. The confirmation names the chosen meeting and permanently removes its transcript and all local audio files, including the original microphone/system tracks and balanced playback audio. Cancelling leaves the meeting untouched. The same action remains available below the transcript; an active recording must be stopped before it can be deleted.
+
 Audio plays directly inside MeetingBar. Playback measures and balances the retained microphone and system tracks independently for every recording, regardless of the connected device, then applies a soft limiter without changing either source file. Local transcription recognizes the timestamp-aligned tracks independently before merging their text. ElevenLabs transcription instead normalizes and aligns both tracks locally, mixes them into one temporary mono file, and uploads that file once. This preserves balanced speech without billing twice for the same meeting duration.
 
 ## Requirements

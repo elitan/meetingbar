@@ -64,7 +64,12 @@ final class ProductScreenshotTests: XCTestCase {
     let view = NSHostingView(
       rootView: ZStack {
         MeetingBarBackdrop()
-        RecordingDetailView(recording: recording, controller: controller)
+        RecordingDetailView(
+          recording: recording,
+          controller: controller,
+          audioPlayback: AudioPlaybackController(),
+          onDelete: {}
+        )
       }
       .meetingBarWindowTint()
       .modelContainer(container)

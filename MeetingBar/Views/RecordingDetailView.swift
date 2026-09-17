@@ -4,9 +4,8 @@ import SwiftUI
 struct RecordingDetailView: View {
   @Bindable var recording: Recording
   let controller: AppController
-  @State private var confirmsDeletion = false
-  @State private var deletionError: String?
-  @State private var audioPlayback = AudioPlaybackController()
+  @Bindable var audioPlayback: AudioPlaybackController
+  let onDelete: () -> Void
   @State private var isEditingTitle = false
   @State private var draftTitle = ""
   @FocusState private var isTitleFocused: Bool
@@ -43,9 +42,10 @@ struct RecordingDetailView: View {
             .foregroundStyle(.tertiary)
           Spacer()
           Button("Delete Meeting…", systemImage: "trash", role: .destructive) {
-            confirmsDeletion = true
+            onDelete()
           }
           .buttonStyle(.borderless)
+          .disabled(recording.isCapturing)
         }
         .padding(.horizontal, 4)
       }
@@ -57,32 +57,6 @@ struct RecordingDetailView: View {
     .id(recording.id)
     .safeAreaInset(edge: .bottom, spacing: 0) {
       sourceAudioCard
-    }
-    .alert("Delete this meeting?", isPresented: $confirmsDeletion) {
-      Button("Cancel", role: .cancel) {}
-      Button("Delete", role: .destructive) {
-        do {
-          audioPlayback.unload()
-          try controller.delete(recording)
-        } catch {
-          deletionError = error.localizedDescription
-        }
-      }
-    } message: {
-      Text(
-        "The transcript and any source audio will be removed immediately. This cannot be undone."
-      )
-    }
-    .alert(
-      "Meeting could not be deleted",
-      isPresented: Binding(
-        get: { deletionError != nil },
-        set: { if !$0 { deletionError = nil } }
-      )
-    ) {
-      Button("OK") {}
-    } message: {
-      Text(deletionError ?? "Unknown error")
     }
     .alert(
       "Recording could not be played",
