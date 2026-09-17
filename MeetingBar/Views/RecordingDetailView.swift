@@ -235,13 +235,10 @@ struct RecordingDetailView: View {
         }
 
         if recording.status == .ready, !recording.transcript.isEmpty {
-          Button {
+          TranscriptCopyButton {
             controller.copyTranscript(recording)
-          } label: {
-            Label("Copy", systemImage: "doc.on.doc")
           }
-          .buttonStyle(.borderless)
-          .controlSize(.small)
+          .id(recording.id)
         }
       }
       .padding(.vertical, 20)

@@ -480,9 +480,10 @@ final class AppController {
     NSWorkspace.shared.activateFileViewerSelecting([url])
   }
 
-  func copyTranscript(_ recording: Recording) {
-    NSPasteboard.general.clearContents()
-    NSPasteboard.general.setString(recording.transcript, forType: .string)
+  @discardableResult
+  func copyTranscript(_ recording: Recording, to pasteboard: NSPasteboard = .general) -> Bool {
+    pasteboard.clearContents()
+    return pasteboard.setString(recording.transcript, forType: .string)
   }
 
   func quit() async {
