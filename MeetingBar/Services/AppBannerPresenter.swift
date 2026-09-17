@@ -422,7 +422,7 @@ private struct AppBannerView: View {
               .fill(MeetingBarTheme.accent.opacity(0.14))
               .overlay(alignment: .leading) {
                 Capsule()
-                  .fill(MeetingBarTheme.accentGradient)
+                  .fill(MeetingBarTheme.accent)
                   .frame(width: geometry.size.width * countdown.fractionRemaining)
               }
           }
@@ -445,47 +445,20 @@ private struct AppBannerView: View {
           .keyboardShortcut(.cancelAction)
         if let primaryActionTitle {
           Button(primaryActionTitle, action: onPrimaryAction)
-            .buttonStyle(AppBannerPrimaryButtonStyle())
+            .buttonStyle(MeetingBarPrimaryButtonStyle(fillsWidth: false))
             .keyboardShortcut(.defaultAction)
         }
       }
     }
-    .padding(16)
-    .padding(.top, 2)
+    .padding(20)
     .frame(maxWidth: .infinity, alignment: .leading)
-    .background(.thickMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-    .overlay(alignment: .top) {
-      LinearGradient(
-        colors: [MeetingBarTheme.accent.opacity(0.80), MeetingBarTheme.coral.opacity(0.58)],
-        startPoint: .leading,
-        endPoint: .trailing
-      )
-      .frame(height: 2)
-      .clipShape(
-        UnevenRoundedRectangle(
-          topLeadingRadius: 18,
-          topTrailingRadius: 18
-        )
-      )
-    }
+    .background(MeetingBarTheme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     .overlay {
-      RoundedRectangle(cornerRadius: 18, style: .continuous)
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
         .stroke(MeetingBarTheme.subtleBorder, lineWidth: 1)
     }
     .padding(1)
-  }
-}
-
-private struct AppBannerPrimaryButtonStyle: ButtonStyle {
-  func makeBody(configuration: Configuration) -> some View {
-    configuration.label
-      .font(.subheadline.weight(.semibold))
-      .foregroundStyle(.white)
-      .padding(.horizontal, 15)
-      .frame(height: 34)
-      .background(MeetingBarTheme.accentGradient, in: RoundedRectangle(cornerRadius: 10))
-      .opacity(configuration.isPressed ? 0.84 : 1)
-      .scaleEffect(configuration.isPressed ? 0.98 : 1)
+    .meetingBarWindowTint()
   }
 }
 
@@ -493,16 +466,16 @@ private struct AppBannerSecondaryButtonStyle: ButtonStyle {
   let isDestructive: Bool
 
   func makeBody(configuration: Configuration) -> some View {
-    let color = isDestructive ? MeetingBarTheme.coral : Color.secondary
+    let color = isDestructive ? MeetingBarTheme.coral : MeetingBarTheme.text
     configuration.label
       .font(.subheadline.weight(.semibold))
       .foregroundStyle(color)
       .padding(.horizontal, 14)
       .frame(height: 34)
-      .background(color.opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
+      .background(MeetingBarTheme.quietFill, in: RoundedRectangle(cornerRadius: 8))
       .overlay {
-        RoundedRectangle(cornerRadius: 10)
-          .stroke(color.opacity(0.14), lineWidth: 1)
+        RoundedRectangle(cornerRadius: 8)
+          .stroke(MeetingBarTheme.subtleBorder, lineWidth: 1)
       }
       .opacity(configuration.isPressed ? 0.72 : 1)
   }

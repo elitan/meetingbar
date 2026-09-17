@@ -1,57 +1,29 @@
 import SwiftUI
 
 enum MeetingBarTheme {
-  static let accent = Color(red: 0.36, green: 0.34, blue: 0.98)
-  static let accentBright = Color(red: 0.47, green: 0.42, blue: 1.00)
-  static let coral = Color(red: 1.00, green: 0.31, blue: 0.38)
-  static let mint = Color(red: 0.16, green: 0.74, blue: 0.61)
-  static let amber = Color(red: 0.96, green: 0.64, blue: 0.18)
-
-  static var accentGradient: LinearGradient {
-    LinearGradient(
-      colors: [accentBright, accent],
-      startPoint: .topLeading,
-      endPoint: .bottomTrailing
-    )
-  }
-
-  static var recordingGradient: LinearGradient {
-    LinearGradient(
-      colors: [Color(red: 1.00, green: 0.40, blue: 0.39), coral],
-      startPoint: .topLeading,
-      endPoint: .bottomTrailing
-    )
-  }
+  static let canvas = Color(red: 0.055, green: 0.060, blue: 0.065)
+  static let sidebar = Color(red: 0.080, green: 0.085, blue: 0.090)
+  static let surface = Color(red: 0.105, green: 0.110, blue: 0.118)
+  static let selection = Color(red: 0.155, green: 0.163, blue: 0.175)
+  static let accent = Color(white: 0.90)
+  static let text = Color(white: 0.94)
+  static let controlTint = Color(red: 0.38, green: 0.40, blue: 0.43)
+  static let coral = Color(red: 1.00, green: 0.39, blue: 0.42)
+  static let mint = Color(red: 0.43, green: 0.76, blue: 0.61)
+  static let amber = Color(red: 0.92, green: 0.71, blue: 0.40)
 
   static var subtleBorder: Color {
-    Color.primary.opacity(0.10)
+    Color.white.opacity(0.10)
   }
 
   static var quietFill: Color {
-    Color.primary.opacity(0.055)
+    Color.white.opacity(0.045)
   }
 }
 
 struct MeetingBarBackdrop: View {
   var body: some View {
-    ZStack {
-      Color(nsColor: .windowBackgroundColor)
-
-      RadialGradient(
-        colors: [MeetingBarTheme.accent.opacity(0.13), .clear],
-        center: .topLeading,
-        startRadius: 0,
-        endRadius: 520
-      )
-
-      RadialGradient(
-        colors: [MeetingBarTheme.coral.opacity(0.055), .clear],
-        center: .bottomTrailing,
-        startRadius: 0,
-        endRadius: 440
-      )
-    }
-    .ignoresSafeArea()
+    MeetingBarTheme.canvas.ignoresSafeArea()
   }
 }
 
@@ -59,27 +31,22 @@ struct MeetingBarLogo: View {
   var size: CGFloat = 34
 
   var body: some View {
-    ZStack {
-      RoundedRectangle(cornerRadius: size * 0.30, style: .continuous)
-        .fill(MeetingBarTheme.accentGradient)
-      Image(systemName: "waveform")
-        .font(.system(size: size * 0.43, weight: .bold))
-        .foregroundStyle(.white)
-    }
-    .frame(width: size, height: size)
-    .shadow(color: MeetingBarTheme.accent.opacity(0.24), radius: 10, y: 4)
-    .accessibilityHidden(true)
+    Image(systemName: "waveform")
+      .font(.system(size: size * 0.72, weight: .medium))
+      .foregroundStyle(MeetingBarTheme.text)
+      .frame(width: size, height: size)
+      .accessibilityHidden(true)
   }
 }
 
 struct MeetingBarCard<Content: View>: View {
   var padding: CGFloat = 18
-  var cornerRadius: CGFloat = 18
+  var cornerRadius: CGFloat = 10
   @ViewBuilder let content: Content
 
   init(
     padding: CGFloat = 18,
-    cornerRadius: CGFloat = 18,
+    cornerRadius: CGFloat = 10,
     @ViewBuilder content: () -> Content
   ) {
     self.padding = padding
@@ -90,7 +57,10 @@ struct MeetingBarCard<Content: View>: View {
   var body: some View {
     content
       .padding(padding)
-      .background(.regularMaterial, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+      .background(
+        MeetingBarTheme.surface,
+        in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+      )
       .overlay {
         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
           .stroke(MeetingBarTheme.subtleBorder, lineWidth: 1)
@@ -109,7 +79,9 @@ struct MeetingBarIconTile: View {
       .symbolRenderingMode(.hierarchical)
       .foregroundStyle(color)
       .frame(width: size, height: size)
-      .background(color.opacity(0.13), in: RoundedRectangle(cornerRadius: size * 0.30, style: .continuous))
+      .background(
+        color.opacity(0.07), in: RoundedRectangle(cornerRadius: size * 0.23, style: .continuous)
+      )
       .accessibilityHidden(true)
   }
 }
@@ -151,12 +123,12 @@ struct MeetingBarPill: View {
     }
     .font(.caption.weight(.semibold))
     .foregroundStyle(tone.color)
-    .padding(.horizontal, 9)
-    .padding(.vertical, 5)
-    .background(tone.color.opacity(0.11), in: Capsule())
+    .padding(.horizontal, 7)
+    .padding(.vertical, 4)
+    .background(tone.color.opacity(0.07), in: RoundedRectangle(cornerRadius: 6))
     .overlay {
-      Capsule()
-        .stroke(tone.color.opacity(0.16), lineWidth: 1)
+      RoundedRectangle(cornerRadius: 6)
+        .stroke(tone.color.opacity(0.12), lineWidth: 1)
     }
   }
 }
@@ -221,32 +193,48 @@ struct MeetingBarAudioMeter: View {
 }
 
 struct MeetingBarPrimaryButtonStyle: ButtonStyle {
+  @Environment(\.isEnabled) private var isEnabled
   var isRecording = false
+  var fillsWidth = true
 
   func makeBody(configuration: Configuration) -> some View {
     configuration.label
-      .font(.headline)
-      .foregroundStyle(.white)
-      .padding(.horizontal, 16)
-      .padding(.vertical, 11)
-      .frame(maxWidth: .infinity)
+      .font(.subheadline.weight(.semibold))
+      .foregroundStyle(MeetingBarTheme.canvas)
+      .padding(.horizontal, 14)
+      .padding(.vertical, fillsWidth ? 11 : 8)
+      .frame(maxWidth: fillsWidth ? .infinity : nil)
       .background(
-        isRecording ? MeetingBarTheme.recordingGradient : MeetingBarTheme.accentGradient,
-        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+        isRecording ? MeetingBarTheme.coral : MeetingBarTheme.accent,
+        in: RoundedRectangle(cornerRadius: 8, style: .continuous)
       )
-      .scaleEffect(configuration.isPressed ? 0.98 : 1)
-      .opacity(configuration.isPressed ? 0.88 : 1)
-      .shadow(
-        color: (isRecording ? MeetingBarTheme.coral : MeetingBarTheme.accent).opacity(0.20),
-        radius: 10,
-        y: 4
-      )
-      .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+      .opacity(!isEnabled ? 0.40 : configuration.isPressed ? 0.78 : 1)
+  }
+}
+
+struct MeetingBarSecondaryButtonStyle: ButtonStyle {
+  @Environment(\.isEnabled) private var isEnabled
+
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .font(.subheadline.weight(.medium))
+      .foregroundStyle(MeetingBarTheme.text)
+      .padding(.horizontal, 10)
+      .padding(.vertical, 6)
+      .background(MeetingBarTheme.quietFill, in: RoundedRectangle(cornerRadius: 6))
+      .overlay {
+        RoundedRectangle(cornerRadius: 6)
+          .stroke(MeetingBarTheme.subtleBorder, lineWidth: 1)
+      }
+      .opacity(!isEnabled ? 0.40 : configuration.isPressed ? 0.70 : 1)
   }
 }
 
 extension View {
   func meetingBarWindowTint() -> some View {
-    tint(MeetingBarTheme.accent)
+    tint(MeetingBarTheme.controlTint)
+      .foregroundStyle(MeetingBarTheme.text)
+      .preferredColorScheme(.dark)
+      .environment(\.colorScheme, .dark)
   }
 }

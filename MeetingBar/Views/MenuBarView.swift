@@ -122,7 +122,6 @@ struct MenuBarView: View {
           Circle()
             .fill(statusColor)
             .frame(width: 7, height: 7)
-            .shadow(color: statusColor.opacity(0.40), radius: 4)
           Text(controller.capture.state.isRecording ? "Recording now" : "Ready to record")
             .font(.subheadline.weight(.semibold))
         }
@@ -160,10 +159,11 @@ struct MenuBarView: View {
       .keyboardShortcut(.return, modifiers: [])
     }
     .padding(15)
-    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+    .background(MeetingBarTheme.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     .overlay {
-      RoundedRectangle(cornerRadius: 17, style: .continuous)
-        .stroke(statusColor.opacity(controller.capture.state.isRecording ? 0.24 : 0.11), lineWidth: 1)
+      RoundedRectangle(cornerRadius: 10, style: .continuous)
+        .stroke(
+          statusColor.opacity(controller.capture.state.isRecording ? 0.24 : 0.11), lineWidth: 1)
     }
   }
 
@@ -198,7 +198,7 @@ struct MenuBarView: View {
       }
     } label: {
       HStack(spacing: 10) {
-        MeetingBarIconTile(symbol: "mic.fill", color: MeetingBarTheme.mint, size: 34)
+        MeetingBarIconTile(symbol: "mic.fill", size: 30)
         VStack(alignment: .leading, spacing: 1) {
           Text("Input microphone")
             .font(.caption)
@@ -213,9 +213,9 @@ struct MenuBarView: View {
           .foregroundStyle(.tertiary)
       }
       .padding(10)
-      .background(MeetingBarTheme.quietFill, in: RoundedRectangle(cornerRadius: 12))
+      .background(MeetingBarTheme.quietFill, in: RoundedRectangle(cornerRadius: 8))
       .overlay {
-        RoundedRectangle(cornerRadius: 12)
+        RoundedRectangle(cornerRadius: 8)
           .stroke(MeetingBarTheme.subtleBorder, lineWidth: 1)
       }
     }

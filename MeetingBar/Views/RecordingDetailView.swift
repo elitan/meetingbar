@@ -27,7 +27,7 @@ struct RecordingDetailView: View {
               Button("Retry Transcription") {
                 controller.retry(recording)
               }
-              .buttonStyle(.borderedProminent)
+              .buttonStyle(MeetingBarPrimaryButtonStyle(fillsWidth: false))
             }
           }
         }
@@ -37,8 +37,6 @@ struct RecordingDetailView: View {
         }
 
         transcriptCard
-        sourceAudioCard
-
         HStack {
           Label("Library and audio stored on this Mac", systemImage: "internaldrive.fill")
             .font(.caption)
@@ -55,6 +53,10 @@ struct RecordingDetailView: View {
       .padding(.vertical, 30)
       .frame(maxWidth: 900, alignment: .leading)
       .frame(maxWidth: .infinity)
+    }
+    .id(recording.id)
+    .safeAreaInset(edge: .bottom, spacing: 0) {
+      sourceAudioCard
     }
     .alert("Delete this meeting?", isPresented: $confirmsDeletion) {
       Button("Cancel", role: .cancel) {}
@@ -113,7 +115,7 @@ struct RecordingDetailView: View {
         VStack(alignment: .leading, spacing: 7) {
           if isEditingTitle {
             TextField("Meeting title", text: $draftTitle, axis: .vertical)
-              .font(.system(size: 29, weight: .bold, design: .rounded))
+              .font(.system(size: 28, weight: .semibold))
               .textFieldStyle(.plain)
               .lineLimit(1...2)
               .focused($isTitleFocused)
@@ -130,17 +132,13 @@ struct RecordingDetailView: View {
               }
           } else {
             Text(recording.title)
-              .font(.system(size: 29, weight: .bold, design: .rounded))
+              .font(.system(size: 28, weight: .semibold))
               .lineLimit(2)
               .textSelection(.enabled)
               .onTapGesture(count: 2) {
                 beginTitleEdit()
               }
           }
-
-          Text("Double-click a title in the sidebar or edit it here.")
-            .font(.caption)
-            .foregroundStyle(.tertiary)
         }
 
         Spacer(minLength: 12)
@@ -152,11 +150,6 @@ struct RecordingDetailView: View {
             .font(.system(size: 15, weight: .semibold))
             .foregroundStyle(.secondary)
             .frame(width: 38, height: 38)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-            .overlay {
-              RoundedRectangle(cornerRadius: 11, style: .continuous)
-                .stroke(MeetingBarTheme.subtleBorder, lineWidth: 1)
-            }
         }
         .buttonStyle(.plain)
         .help("Rename meeting")
@@ -169,11 +162,6 @@ struct RecordingDetailView: View {
             .font(.system(size: 15, weight: .semibold))
             .foregroundStyle(recording.isPinned ? MeetingBarTheme.accent : Color.secondary)
             .frame(width: 38, height: 38)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-            .overlay {
-              RoundedRectangle(cornerRadius: 11, style: .continuous)
-                .stroke(MeetingBarTheme.subtleBorder, lineWidth: 1)
-            }
         }
         .buttonStyle(.plain)
         .help(recording.isPinned ? "Unpin meeting" : "Pin meeting")
@@ -216,7 +204,7 @@ struct RecordingDetailView: View {
   }
 
   private var warningCard: some View {
-    MeetingBarCard(padding: 15, cornerRadius: 15) {
+    MeetingBarCard(padding: 15, cornerRadius: 10) {
       DisclosureGroup {
         VStack(alignment: .leading, spacing: 8) {
           ForEach(Array(recording.captureWarnings.enumerated()), id: \.offset) { _, warning in
@@ -244,54 +232,50 @@ struct RecordingDetailView: View {
   }
 
   private var transcriptCard: some View {
-    MeetingBarCard(padding: 0, cornerRadius: 20) {
-      VStack(alignment: .leading, spacing: 0) {
-        HStack(spacing: 12) {
-          MeetingBarIconTile(symbol: "text.alignleft", size: 38)
-          VStack(alignment: .leading, spacing: 2) {
-            Text("Transcript")
-              .font(.headline)
-            Text(transcriptSubtitle)
-              .font(.caption)
-              .foregroundStyle(.secondary)
-          }
-
-          Spacer()
-
-          if recording.status == .ready, controller.audioURL(for: recording) != nil {
-            Button {
-              controller.retry(recording)
-            } label: {
-              Label(
-                SpeakerTranscriptFormatter.containsSpeakerLabels(recording.transcript)
-                  ? "Transcribe Again"
-                  : "Detect Speakers",
-                systemImage: "person.2.wave.2"
-              )
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-          }
-
-          if recording.status == .ready, !recording.transcript.isEmpty {
-            Button {
-              controller.copyTranscript(recording)
-            } label: {
-              Label("Copy", systemImage: "doc.on.doc")
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-          }
+    VStack(alignment: .leading, spacing: 0) {
+      Divider()
+      HStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: 2) {
+          Text("Transcript")
+            .font(.headline)
+          Text(transcriptSubtitle)
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
-        .padding(18)
 
-        Divider()
-          .opacity(0.55)
+        Spacer()
 
-        TranscriptContentView(recording: recording)
-          .padding(22)
-          .frame(maxWidth: .infinity, alignment: .leading)
+        if recording.status == .ready, controller.audioURL(for: recording) != nil {
+          Button {
+            controller.retry(recording)
+          } label: {
+            Label(
+              SpeakerTranscriptFormatter.containsSpeakerLabels(recording.transcript)
+                ? "Transcribe Again"
+                : "Detect Speakers",
+              systemImage: "arrow.clockwise"
+            )
+          }
+          .buttonStyle(.borderless)
+          .controlSize(.small)
+        }
+
+        if recording.status == .ready, !recording.transcript.isEmpty {
+          Button {
+            controller.copyTranscript(recording)
+          } label: {
+            Label("Copy", systemImage: "doc.on.doc")
+          }
+          .buttonStyle(.borderless)
+          .controlSize(.small)
+        }
       }
+      .padding(.vertical, 20)
+
+      TranscriptContentView(recording: recording)
+        .padding(.top, 8)
+        .padding(.bottom, 24)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
   }
 
@@ -320,36 +304,15 @@ struct RecordingDetailView: View {
 
   @ViewBuilder
   private var sourceAudioCard: some View {
-    MeetingBarCard(padding: 0, cornerRadius: 20) {
-      VStack(alignment: .leading, spacing: 0) {
-        HStack(spacing: 12) {
-          MeetingBarIconTile(symbol: "waveform", color: MeetingBarTheme.coral, size: 38)
-          VStack(alignment: .leading, spacing: 2) {
-            Text("Source Audio")
-              .font(.headline)
-            Text("Balanced automatically for comfortable playback")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-          }
-          Spacer()
-
-          if controller.audioURL(for: recording) != nil {
-            Button("Reveal in Finder", systemImage: "folder") {
-              controller.revealAudio(for: recording)
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-          }
-        }
-        .padding(18)
-
-        Divider()
-          .opacity(0.55)
-
-        audioPlayerContent
-          .padding(20)
-      }
+    VStack(spacing: 0) {
+      Divider()
+      audioPlayerContent
+        .padding(.horizontal, 30)
+        .padding(.vertical, 16)
+        .frame(maxWidth: 900)
+        .frame(maxWidth: .infinity)
     }
+    .background(MeetingBarTheme.sidebar)
   }
 
   @ViewBuilder
@@ -360,51 +323,55 @@ struct RecordingDetailView: View {
         ? audioPlayback.duration
         : recording.durationSeconds
 
-      VStack(alignment: .leading, spacing: 16) {
+      VStack(alignment: .leading, spacing: 10) {
         HStack(spacing: 15) {
           Button {
             toggleAudioPlayback()
           } label: {
             Image(systemName: audioPlayback.isPlaying ? "pause.fill" : "play.fill")
               .font(.system(size: 15, weight: .bold))
-              .foregroundStyle(.white)
+              .foregroundStyle(MeetingBarTheme.text)
               .frame(width: 42, height: 42)
               .background(
-                audioPlayback.isPlaying
-                  ? MeetingBarTheme.recordingGradient
-                  : MeetingBarTheme.accentGradient,
+                MeetingBarTheme.selection,
                 in: Circle()
-              )
-              .shadow(
-                color: (audioPlayback.isPlaying ? MeetingBarTheme.coral : MeetingBarTheme.accent)
-                  .opacity(0.22),
-                radius: 8,
-                y: 3
               )
           }
           .buttonStyle(.plain)
           .disabled(audioPlayback.isPreparing)
           .help(audioPlayback.isPlaying ? "Pause" : "Play")
 
-          VStack(spacing: 7) {
-            Slider(
-              value: Binding(
-                get: { audioPlayback.currentTime },
-                set: { audioPlayback.seek(to: $0) }
-              ),
-              in: 0...max(playbackDuration, 0.1)
-            )
-            .tint(MeetingBarTheme.accent)
-            .disabled(audioPlayback.isPreparing)
+          Slider(
+            value: Binding(
+              get: { audioPlayback.currentTime },
+              set: { audioPlayback.seek(to: $0) }
+            ),
+            in: 0...max(playbackDuration, 0.1)
+          )
+          .tint(MeetingBarTheme.accent)
+          .disabled(audioPlayback.isPreparing)
+          .accessibilityLabel("Playback position")
 
-            HStack {
-              Text(DurationText.string(seconds: audioPlayback.currentTime))
-              Spacer()
-              Text(DurationText.string(seconds: playbackDuration))
-            }
-            .font(.caption2.monospacedDigit())
-            .foregroundStyle(.tertiary)
+          HStack(spacing: 4) {
+            Text(DurationText.string(seconds: audioPlayback.currentTime))
+            Text("/")
+            Text(DurationText.string(seconds: playbackDuration))
           }
+          .font(.caption.monospacedDigit())
+          .foregroundStyle(.secondary)
+          .fixedSize()
+
+          Button {
+            controller.revealAudio(for: recording)
+          } label: {
+            Image(systemName: "folder")
+              .font(.system(size: 17))
+              .frame(width: 32, height: 32)
+          }
+          .buttonStyle(.plain)
+          .foregroundStyle(.secondary)
+          .help("Reveal audio in Finder")
+          .accessibilityLabel("Reveal audio in Finder")
         }
 
         HStack(spacing: 8) {
@@ -423,20 +390,26 @@ struct RecordingDetailView: View {
           }
 
           Spacer()
-          Text("Kept on this Mac until you delete this meeting")
+          Image(systemName: "internaldrive")
+            .help("Original audio stays on this Mac until you delete this meeting")
         }
         .font(.caption)
         .foregroundStyle(.secondary)
+        .lineLimit(1)
+        .frame(height: 18)
       }
     } else {
       HStack(spacing: 12) {
-        MeetingBarIconTile(symbol: "checkmark", color: MeetingBarTheme.mint, size: 38)
+        Image(systemName: "waveform.slash")
+          .foregroundStyle(.secondary)
         VStack(alignment: .leading, spacing: 2) {
           Text("Audio unavailable")
             .font(.subheadline.weight(.semibold))
-          Text("This older recording no longer has source audio; its transcript remains searchable.")
-            .font(.caption)
-            .foregroundStyle(.secondary)
+          Text(
+            "This older recording no longer has source audio; its transcript remains searchable."
+          )
+          .font(.caption)
+          .foregroundStyle(.secondary)
         }
       }
       .frame(maxWidth: .infinity, alignment: .leading)
@@ -541,19 +514,19 @@ private struct SpeakerTranscriptView: View, Equatable {
   var body: some View {
     let turns = TranscriptTurn.parse(transcript)
     if turns.contains(where: { $0.speakerID != nil }) {
-      LazyVStack(alignment: .leading, spacing: 20) {
+      LazyVStack(alignment: .leading, spacing: 26) {
         ForEach(turns) { turn in
           HStack(alignment: .top, spacing: 13) {
             speakerAvatar(for: turn)
             VStack(alignment: .leading, spacing: 4) {
               if let speakerID = turn.speakerID {
                 Text("Speaker \(speakerID)")
-                  .font(.caption.weight(.bold))
-                  .foregroundStyle(speakerColor(for: speakerID))
+                  .font(.caption.weight(.semibold))
+                  .foregroundStyle(.secondary)
               }
               Text(turn.text)
-                .font(.body)
-                .lineSpacing(4)
+                .font(.system(size: 15))
+                .lineSpacing(6)
             }
           }
         }
@@ -561,8 +534,8 @@ private struct SpeakerTranscriptView: View, Equatable {
       .textSelection(.enabled)
     } else {
       Text(transcript)
-        .font(.body)
-        .lineSpacing(5)
+        .font(.system(size: 15))
+        .lineSpacing(6)
         .textSelection(.enabled)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -570,24 +543,21 @@ private struct SpeakerTranscriptView: View, Equatable {
 
   private func speakerAvatar(for turn: TranscriptTurn) -> some View {
     let speakerID = turn.speakerID ?? 0
-    return Text(turn.speakerID.map(String.init) ?? "•")
-      .font(.caption.weight(.bold))
-      .foregroundStyle(speakerColor(for: speakerID))
-      .frame(width: 30, height: 30)
-      .background(
-        speakerColor(for: speakerID).opacity(0.12),
-        in: RoundedRectangle(cornerRadius: 9, style: .continuous)
-      )
+    return Circle()
+      .fill(speakerColor(for: speakerID))
+      .frame(width: 6, height: 6)
+      .padding(.top, 5)
+      .accessibilityHidden(true)
   }
 
   private func speakerColor(for speakerID: Int) -> Color {
     let colors = [
-      MeetingBarTheme.accent,
-      MeetingBarTheme.coral,
+      Color(red: 0.58, green: 0.67, blue: 0.78),
+      Color(red: 0.67, green: 0.60, blue: 0.80),
       MeetingBarTheme.mint,
       MeetingBarTheme.amber,
-      Color.cyan,
-      Color.pink,
+      Color(red: 0.50, green: 0.72, blue: 0.74),
+      Color(red: 0.78, green: 0.57, blue: 0.63),
     ]
     return colors[abs(speakerID) % colors.count]
   }

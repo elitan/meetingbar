@@ -31,13 +31,14 @@ struct OnboardingView: View {
           ScrollView {
             VStack(alignment: .leading, spacing: 14) {
               Text("A few things before your first meeting")
-                .font(.system(size: 25, weight: .bold, design: .rounded))
+                .font(.system(size: 25, weight: .semibold))
               Text("Setup takes a minute. Recording stays one shortcut away after this.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .padding(.bottom, 4)
 
-              setupStep(number: 1, title: "Record with consent", symbol: "person.2.badge.gearshape") {
+              setupStep(number: 1, title: "Record with consent", symbol: "person.2.badge.gearshape")
+              {
                 Toggle(
                   "I will inform participants and only record when it is lawful.",
                   isOn: $consentAccepted
@@ -68,7 +69,8 @@ struct OnboardingView: View {
                   } else {
                     LabeledContent("Preferred microphone") {
                       Picker("Preferred microphone", selection: preferredMicrophoneBinding) {
-                        ForEach(controller.microphonePreferences.connectedMicrophones) { microphone in
+                        ForEach(controller.microphonePreferences.connectedMicrophones) {
+                          microphone in
                           Text(microphone.name).tag(microphone.id)
                         }
                       }
@@ -84,6 +86,7 @@ struct OnboardingView: View {
                       screenGranted = AudioCaptureController.hasScreenPermission
                       controller.refreshMicrophones()
                     }
+                    .buttonStyle(MeetingBarSecondaryButtonStyle())
                     .controlSize(.small)
                   }
                 }
@@ -175,7 +178,7 @@ struct OnboardingView: View {
                       ) {
                         saveElevenLabsAPIKey()
                       }
-                      .buttonStyle(.borderedProminent)
+                      .buttonStyle(MeetingBarPrimaryButtonStyle(fillsWidth: false))
                       .disabled(
                         elevenLabsAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                       )
@@ -235,7 +238,7 @@ struct OnboardingView: View {
                           await controller.prepareModel()
                         }
                       }
-                      .buttonStyle(.borderedProminent)
+                      .buttonStyle(MeetingBarPrimaryButtonStyle(fillsWidth: false))
                     }
                   }
                 }
@@ -291,13 +294,13 @@ struct OnboardingView: View {
               dismissWindow(id: "onboarding")
               MeetingBarApplicationPresentation.openWindow(id: "main", using: openWindow)
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(MeetingBarPrimaryButtonStyle(fillsWidth: false))
             .controlSize(.large)
             .disabled(!canFinish)
           }
           .padding(.horizontal, 24)
           .padding(.vertical, 16)
-          .background(.ultraThinMaterial)
+          .background(MeetingBarTheme.sidebar)
         }
       }
     }
@@ -317,22 +320,14 @@ struct OnboardingView: View {
 
   private var onboardingHero: some View {
     ZStack {
-      LinearGradient(
-        colors: [
-          MeetingBarTheme.accent.opacity(0.24),
-          MeetingBarTheme.accent.opacity(0.07),
-          Color.clear,
-        ],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
-      )
+      MeetingBarTheme.sidebar
 
       VStack(alignment: .leading, spacing: 22) {
         MeetingBarLogo(size: 58)
 
         VStack(alignment: .leading, spacing: 7) {
           Text("MeetingBar")
-            .font(.system(size: 30, weight: .bold, design: .rounded))
+            .font(.system(size: 30, weight: .semibold))
           Text("A private memory for every conversation.")
             .font(.body)
             .foregroundStyle(.secondary)
@@ -369,10 +364,10 @@ struct OnboardingView: View {
     symbol: String,
     @ViewBuilder content: () -> Content
   ) -> some View {
-    MeetingBarCard(padding: 17, cornerRadius: 17) {
+    MeetingBarCard(padding: 17, cornerRadius: 10) {
       HStack(alignment: .top, spacing: 13) {
         ZStack {
-          RoundedRectangle(cornerRadius: 11, style: .continuous)
+          RoundedRectangle(cornerRadius: 8, style: .continuous)
             .fill(MeetingBarTheme.accent.opacity(0.12))
           VStack(spacing: 1) {
             Image(systemName: symbol)
@@ -412,7 +407,7 @@ struct OnboardingView: View {
         MeetingBarPill(text: "Allowed", tone: .success)
       } else {
         Button("Allow", action: action)
-          .buttonStyle(.borderedProminent)
+          .buttonStyle(MeetingBarPrimaryButtonStyle(fillsWidth: false))
           .controlSize(.small)
       }
     }
@@ -453,8 +448,8 @@ struct OnboardingView: View {
           ? "arrow.down.circle"
           : "cloud"
       )
-        .font(.caption)
-        .foregroundStyle(.secondary)
+      .font(.caption)
+      .foregroundStyle(.secondary)
     case .downloading(let progress):
       VStack(alignment: .leading, spacing: 4) {
         ProgressView(value: progress)

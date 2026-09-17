@@ -1,8 +1,16 @@
 # MeetingBar
 
-MeetingBar is a native macOS recorder for in-person meetings and calls, with a normal Dock/Cmd-Tab app plus fast controls in the menu bar. Its single main window combines the searchable transcript library and settings. MeetingBar captures your preferred available microphone and system audio, transcribes with either local WhisperKit or the optional ElevenLabs Scribe cloud service, and keeps a searchable local transcript library. Local transcription detects speakers with SpeakerKit; ElevenLabs uses Scribe diarization. After transcription, Apple's on-device system language model turns the date placeholder into a short grounded meeting title when the model is available.
+Record meetings from your menu bar. MeetingBar captures your preferred microphone and Mac audio, then turns the conversation into a searchable transcript with on-device WhisperKit or optional ElevenLabs Scribe.
 
-Important meetings can be pinned above the chronological library, and titles can be renamed directly in the left list by double-clicking or using the context menu. A manual title is never replaced by a generated one. When multiple speakers are detected, transcripts are split into turns prefixed with `Speaker 0`, `Speaker 1`, and so on. Single-speaker transcripts remain plain text. Speaker numbers are local to each meeting and assigned by first appearance.
+![MeetingBar's Graphite transcript view with speaker-separated text and built-in audio playback](docs/images/meetingbar-transcript.png)
+
+*The native transcript view, rendered with a fictional demo meeting. No private recordings are shown.*
+
+The Graphite interface combines the library and settings in one window. Pin important meetings, search by title or transcript, and listen while you read with playback controls that stay visible. Closing the window removes MeetingBar from the Dock and Command-Tab; the menu-bar recorder keeps running.
+
+Local transcription detects speakers with SpeakerKit; ElevenLabs uses Scribe diarization. After transcription, Apple's on-device system language model turns the date placeholder into a short grounded meeting title when the model is available.
+
+Important meetings can be pinned above the chronological library, and titles can be renamed directly in the left list using the pencil action or context menu. A manual title is never replaced by a generated one. When multiple speakers are detected, transcripts are split into turns prefixed with `Speaker 0`, `Speaker 1`, and so on. Single-speaker transcripts remain plain text. Speaker numbers are local to each meeting and assigned by first appearance.
 
 Audio plays directly inside MeetingBar. Playback measures and balances the retained microphone and system tracks independently for every recording, regardless of the connected device, then applies a soft limiter without changing either source file. Local transcription recognizes the timestamp-aligned tracks independently before merging their text. ElevenLabs transcription instead normalizes and aligns both tracks locally, mixes them into one temporary mono file, and uploads that file once. This preserves balanced speech without billing twice for the same meeting duration.
 
@@ -122,3 +130,17 @@ Run the real Swedish and English on-device title smoke test with:
 ```sh
 scripts/run-title-benchmark.sh
 ```
+
+## Product screenshot
+
+The README image comes from the real native views with an in-memory library, isolated preferences, an empty credential store, and fictional content. It does not open the personal library, capture audio, or start transcription. Regenerate its test attachment with:
+
+```sh
+xcodebuild test \
+  -project MeetingBar.xcodeproj \
+  -scheme MeetingBar \
+  -destination 'platform=macOS,arch=arm64' \
+  -only-testing:MeetingBarTests/ProductScreenshotTests
+```
+
+Export the PNG from the resulting test report with `xcrun xcresulttool export attachments`. See [screenshot provenance](docs/images/README.md) for details.

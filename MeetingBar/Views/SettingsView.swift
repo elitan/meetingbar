@@ -26,6 +26,7 @@ struct SettingsView: View {
         .frame(maxWidth: 760, alignment: .leading)
         .frame(maxWidth: .infinity)
       }
+      .id(selectedSection)
     }
     .frame(minWidth: 640, minHeight: 560)
     .meetingBarWindowTint()
@@ -57,6 +58,7 @@ struct SettingsView: View {
           Button("Refresh", systemImage: "arrow.clockwise") {
             controller.refreshMicrophones()
           }
+          .buttonStyle(MeetingBarSecondaryButtonStyle())
           .controlSize(.small)
         }
       } else {
@@ -67,6 +69,7 @@ struct SettingsView: View {
           Button("Refresh") {
             controller.refreshMicrophones()
           }
+          .buttonStyle(MeetingBarSecondaryButtonStyle())
         }
       }
 
@@ -117,6 +120,7 @@ struct SettingsView: View {
       Button("Refresh Permission Status", systemImage: "arrow.clockwise") {
         refreshPermissionStatus()
       }
+      .buttonStyle(MeetingBarSecondaryButtonStyle())
       .controlSize(.small)
     }
 
@@ -174,6 +178,7 @@ struct SettingsView: View {
           Button("Show Test Reminder") {
             controller.showTestMeetingReminder()
           }
+          .buttonStyle(MeetingBarSecondaryButtonStyle())
           .controlSize(.small)
         }
 
@@ -287,7 +292,8 @@ struct SettingsView: View {
     if controller.transcriptionPreferences.provider == .elevenLabs {
       SettingsCard(
         title: "ElevenLabs API key",
-        subtitle: "Stored only in MeetingBar's private local app data, never in its database or app bundle.",
+        subtitle:
+          "Stored only in MeetingBar's private local app data, never in its database or app bundle.",
         symbol: "key.fill"
       ) {
         HStack(spacing: 10) {
@@ -302,7 +308,7 @@ struct SettingsView: View {
           Button(controller.transcriptionPreferences.hasElevenLabsAPIKey ? "Replace" : "Save") {
             saveElevenLabsAPIKey()
           }
-          .buttonStyle(.borderedProminent)
+          .buttonStyle(MeetingBarPrimaryButtonStyle(fillsWidth: false))
           .disabled(elevenLabsAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
 
@@ -320,8 +326,8 @@ struct SettingsView: View {
                 : "An API key is required before cloud transcription can run.",
               systemImage: "key"
             )
-              .font(.caption)
-              .foregroundStyle(.secondary)
+            .font(.caption)
+            .foregroundStyle(.secondary)
           }
           Spacer()
           Link(
@@ -373,7 +379,7 @@ struct SettingsView: View {
                 await controller.prepareModel()
               }
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(MeetingBarPrimaryButtonStyle(fillsWidth: false))
           }
         }
       }
@@ -410,7 +416,7 @@ struct SettingsView: View {
                 await controller.prepareModel()
               }
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(MeetingBarPrimaryButtonStyle(fillsWidth: false))
           }
         }
       }
@@ -492,7 +498,8 @@ struct SettingsView: View {
     ) {
       SettingToggleRow(
         title: "Launch MeetingBar at login",
-        detail: "Starts MeetingBar automatically. Close the main window whenever you only need the menu-bar controls.",
+        detail:
+          "Starts MeetingBar automatically. Close the main window whenever you only need the menu-bar controls.",
         isOn: Binding(
           get: { controller.launchAtLoginEnabled },
           set: { _ = controller.setLaunchAtLogin($0) }
@@ -629,7 +636,7 @@ struct SettingsView: View {
         MeetingBarPill(text: "Allowed", tone: .success)
       } else {
         Button("Allow", action: action)
-          .buttonStyle(.borderedProminent)
+          .buttonStyle(MeetingBarPrimaryButtonStyle(fillsWidth: false))
           .controlSize(.small)
       }
     }
@@ -682,9 +689,9 @@ struct SettingsView: View {
     VStack(spacing: 5) {
       Text(number)
         .font(.caption.weight(.bold))
-        .foregroundStyle(.white)
+        .foregroundStyle(MeetingBarTheme.text)
         .frame(width: 28, height: 28)
-        .background(MeetingBarTheme.accentGradient, in: Circle())
+        .background(MeetingBarTheme.selection, in: Circle())
       Text(title)
         .font(.caption.weight(.semibold))
       Text(detail)
@@ -767,16 +774,15 @@ private struct SettingsPageHeader: View {
 
   var body: some View {
     HStack(spacing: 14) {
-      MeetingBarIconTile(symbol: symbol, size: 46)
       VStack(alignment: .leading, spacing: 3) {
         Text(title)
-          .font(.system(size: 28, weight: .bold, design: .rounded))
+          .font(.system(size: 28, weight: .semibold))
         Text(subtitle)
           .font(.subheadline)
           .foregroundStyle(.secondary)
       }
     }
-    .padding(.bottom, 2)
+    .padding(.bottom, 10)
   }
 }
 
@@ -799,10 +805,13 @@ private struct SettingsCard<Content: View>: View {
   }
 
   var body: some View {
-    MeetingBarCard(padding: 18, cornerRadius: 18) {
+    MeetingBarCard(padding: 20, cornerRadius: 10) {
       VStack(alignment: .leading, spacing: 14) {
         HStack(spacing: 11) {
-          MeetingBarIconTile(symbol: symbol, size: 36)
+          Image(systemName: symbol)
+            .font(.system(size: 15))
+            .foregroundStyle(.secondary)
+            .frame(width: 22)
           VStack(alignment: .leading, spacing: 2) {
             Text(title)
               .font(.headline)

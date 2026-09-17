@@ -34,7 +34,7 @@ struct LibraryView: View {
   var body: some View {
     NavigationSplitView {
       librarySidebar
-        .navigationSplitViewColumnWidth(min: 270, ideal: 310, max: 360)
+        .navigationSplitViewColumnWidth(min: 250, ideal: 290, max: 360)
     } detail: {
       switch navigation.workspace {
       case .library:
@@ -63,10 +63,10 @@ struct LibraryView: View {
   private var librarySidebar: some View {
     VStack(spacing: 0) {
       HStack(spacing: 11) {
-        MeetingBarLogo(size: 38)
+        MeetingBarLogo(size: 28)
         VStack(alignment: .leading, spacing: 1) {
           Text("MeetingBar")
-            .font(.headline)
+            .font(.system(size: 17, weight: .semibold))
           Label(
             controller.transcriptionPreferences.provider == .onDevice
               ? "Private · on this Mac"
@@ -75,28 +75,14 @@ struct LibraryView: View {
               ? "lock.fill"
               : "cloud.fill"
           )
-            .font(.caption2)
-            .foregroundStyle(.secondary)
+          .font(.caption2)
+          .foregroundStyle(.secondary)
         }
         Spacer()
       }
       .padding(.horizontal, 18)
       .padding(.top, 16)
       .padding(.bottom, 12)
-
-      Picker("Workspace", selection: $navigation.workspace) {
-        ForEach(MeetingBarWorkspace.allCases) { workspace in
-          Label(workspace.title, systemImage: workspace.symbol)
-            .tag(workspace)
-        }
-      }
-      .pickerStyle(.segmented)
-      .labelsHidden()
-      .padding(.horizontal, 14)
-      .padding(.bottom, 12)
-
-      Divider()
-        .opacity(0.55)
 
       if navigation.workspace == .library {
         libraryNavigation
@@ -108,9 +94,32 @@ struct LibraryView: View {
         .opacity(0.55)
 
       SidebarRecordingControl(controller: controller)
-        .padding(12)
+        .padding(.horizontal, 14)
+        .padding(.top, 14)
+
+      Button {
+        if navigation.workspace == .library {
+          navigation.showSettings()
+        } else {
+          navigation.showLibrary()
+        }
+      } label: {
+        Label(
+          navigation.workspace == .library ? "Settings" : "Back to Library",
+          systemImage: navigation.workspace == .library ? "gearshape" : "arrow.left"
+        )
+        .font(.subheadline)
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10)
+        .frame(height: 36)
+        .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .padding(.horizontal, 14)
+      .padding(.vertical, 8)
     }
-    .background(.ultraThinMaterial)
+    .background(MeetingBarTheme.sidebar)
   }
 
   private var libraryNavigation: some View {
@@ -118,9 +127,6 @@ struct LibraryView: View {
       searchField
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-
-      Divider()
-        .opacity(0.55)
 
       ScrollView {
         LazyVStack(alignment: .leading, spacing: 5) {
@@ -156,13 +162,9 @@ struct LibraryView: View {
             navigation.showSettings(section)
           } label: {
             HStack(spacing: 11) {
-              MeetingBarIconTile(
-                symbol: section.symbol,
-                color: navigation.settingsSection == section
-                  ? MeetingBarTheme.accent
-                  : .secondary,
-                size: 34
-              )
+              Image(systemName: section.symbol)
+                .foregroundStyle(.secondary)
+                .frame(width: 22)
               Text(section.title)
                 .font(.subheadline.weight(.semibold))
               Spacer()
@@ -171,20 +173,14 @@ struct LibraryView: View {
                 .foregroundStyle(.tertiary)
             }
             .padding(.horizontal, 10)
-            .padding(.vertical, 9)
-            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .padding(.vertical, 12)
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .background(
               navigation.settingsSection == section
-                ? MeetingBarTheme.accent.opacity(0.14)
+                ? MeetingBarTheme.selection
                 : Color.clear,
-              in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+              in: RoundedRectangle(cornerRadius: 8, style: .continuous)
             )
-            .overlay {
-              if navigation.settingsSection == section {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                  .stroke(MeetingBarTheme.accent.opacity(0.20), lineWidth: 1)
-              }
-            }
           }
           .buttonStyle(.plain)
         }
@@ -214,18 +210,20 @@ struct LibraryView: View {
     .font(.subheadline)
     .padding(.horizontal, 11)
     .frame(height: 34)
-    .background(MeetingBarTheme.quietFill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    .background(
+      MeetingBarTheme.quietFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+    )
     .overlay {
-      RoundedRectangle(cornerRadius: 10, style: .continuous)
+      RoundedRectangle(cornerRadius: 8, style: .continuous)
         .stroke(MeetingBarTheme.subtleBorder, lineWidth: 1)
     }
   }
 
   private func sidebarSectionTitle(_ title: String, symbol: String) -> some View {
-    Label(title.uppercased(), systemImage: symbol)
-      .font(.caption2.weight(.bold))
-      .tracking(0.7)
-      .foregroundStyle(.tertiary)
+    Text(title.uppercased())
+      .font(.system(size: 10, weight: .medium))
+      .tracking(1)
+      .foregroundStyle(.secondary)
       .padding(.horizontal, 9)
       .padding(.top, 9)
       .padding(.bottom, 3)
@@ -246,8 +244,9 @@ struct LibraryView: View {
   }
 
   private func selectFirstRecordingIfNeeded() {
-    guard selectedRecordingID == nil
-      || !recordings.contains(where: { $0.id == selectedRecordingID })
+    guard
+      selectedRecordingID == nil
+        || !recordings.contains(where: { $0.id == selectedRecordingID })
     else {
       return
     }
@@ -273,120 +272,89 @@ private struct RecordingRow: View {
     case .queued, .transcribing:
       return MeetingBarTheme.amber
     case .ready:
-      return MeetingBarTheme.accent
+      return MeetingBarTheme.mint
     case .failed:
       return MeetingBarTheme.coral
     }
   }
 
-  private var statusSymbol: String {
-    if recording.isCapturing {
-      return "waveform"
-    }
-    switch recording.status {
-    case .queued:
-      return "clock"
-    case .transcribing:
-      return "sparkles"
-    case .ready:
-      return "text.alignleft"
-    case .failed:
-      return "exclamationmark"
-    }
-  }
-
   var body: some View {
-    HStack(alignment: .top, spacing: 10) {
-      MeetingBarIconTile(symbol: statusSymbol, color: statusColor, size: 34)
-        .overlay(alignment: .topTrailing) {
-          if recording.isPinned {
-            Image(systemName: "pin.fill")
-              .font(.system(size: 7, weight: .bold))
-              .foregroundStyle(.white)
-              .frame(width: 13, height: 13)
-              .background(MeetingBarTheme.accent, in: Circle())
-              .offset(x: 3, y: -3)
-          }
-        }
-
-      VStack(alignment: .leading, spacing: 5) {
-        HStack(spacing: 6) {
-          if isRenaming {
-            TextField("Meeting title", text: $draftTitle)
-              .font(.subheadline.weight(.semibold))
-              .textFieldStyle(.plain)
-              .focused($isTitleFocused)
-              .onSubmit {
-                commitRename()
-              }
-              .onExitCommand {
-                cancelRename()
-              }
-          } else {
-            Text(recording.title)
-              .font(.subheadline.weight(.semibold))
-              .lineLimit(1)
-              .truncationMode(.tail)
-              .frame(maxWidth: .infinity, alignment: .leading)
-              .help(recording.title)
-          }
-
-          if isHovering, !isRenaming {
-            HStack(spacing: 3) {
-              Button {
-                beginRename()
-              } label: {
-                Image(systemName: "pencil")
-                  .frame(width: 20, height: 20)
-              }
-              .help("Rename meeting")
-
-              Button {
-                togglePin()
-              } label: {
-                Image(systemName: recording.isPinned ? "pin.slash" : "pin")
-                  .frame(width: 20, height: 20)
-              }
-              .help(recording.isPinned ? "Unpin meeting" : "Pin meeting")
+    VStack(alignment: .leading, spacing: 5) {
+      HStack(spacing: 6) {
+        if isRenaming {
+          TextField("Meeting title", text: $draftTitle)
+            .font(.subheadline.weight(.semibold))
+            .textFieldStyle(.plain)
+            .focused($isTitleFocused)
+            .onSubmit {
+              commitRename()
             }
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.secondary)
-            .buttonStyle(.plain)
-            .fixedSize()
-          }
+            .onExitCommand {
+              cancelRename()
+            }
+        } else {
+          Text(recording.title)
+            .font(.subheadline.weight(.semibold))
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .help(recording.title)
         }
-        .frame(minHeight: 20)
 
-        HStack(spacing: 5) {
-          Circle()
-            .fill(statusColor)
-            .frame(width: 5, height: 5)
-          if recording.status != .ready || recording.isCapturing {
-            Text(recording.isCapturing ? "Recording" : recording.status.label)
+        // Always reserve the action width. Hover changes visibility, never layout.
+        HStack(spacing: 3) {
+          Button {
+            beginRename()
+          } label: {
+            Image(systemName: "pencil")
+              .frame(width: 20, height: 20)
           }
-          Text(recording.startedAt, format: .dateTime.month(.abbreviated).day().hour().minute())
-          Text("·")
-          Text(DurationText.string(seconds: recording.durationSeconds))
-            .monospacedDigit()
+          .help("Rename meeting")
+          .opacity(isHovering && !isRenaming ? 1 : 0)
+          .allowsHitTesting(isHovering && !isRenaming)
+          .accessibilityHidden(!isHovering || isRenaming)
+
+          Button {
+            togglePin()
+          } label: {
+            Image(systemName: recording.isPinned ? "pin.fill" : "pin")
+              .frame(width: 20, height: 20)
+          }
+          .help(recording.isPinned ? "Unpin meeting" : "Pin meeting")
+          .opacity(!isRenaming && (isHovering || recording.isPinned) ? 1 : 0)
+          .allowsHitTesting(!isRenaming && (isHovering || recording.isPinned))
+          .accessibilityHidden(isRenaming || (!isHovering && !recording.isPinned))
         }
-        .font(.caption2)
+        .font(.caption.weight(.semibold))
         .foregroundStyle(.secondary)
-        .lineLimit(1)
+        .buttonStyle(.plain)
+        .fixedSize()
       }
+      .frame(minHeight: 20)
+
+      HStack(spacing: 5) {
+        Circle()
+          .fill(statusColor)
+          .frame(width: 5, height: 5)
+        if recording.status != .ready || recording.isCapturing {
+          Text(recording.isCapturing ? "Recording" : recording.status.label)
+        }
+        Text(recording.startedAt, format: .dateTime.month(.abbreviated).day().hour().minute())
+        Text("·")
+        Text(DurationText.string(seconds: recording.durationSeconds))
+          .monospacedDigit()
+      }
+      .font(.caption2)
+      .foregroundStyle(.secondary)
+      .lineLimit(1)
     }
     .padding(.horizontal, 10)
     .padding(.vertical, 9)
-    .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     .background(
-      isSelected ? MeetingBarTheme.accent.opacity(0.14) : Color.clear,
-      in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+      isSelected ? MeetingBarTheme.selection : isHovering ? MeetingBarTheme.quietFill : Color.clear,
+      in: RoundedRectangle(cornerRadius: 8, style: .continuous)
     )
-    .overlay {
-      if isSelected {
-        RoundedRectangle(cornerRadius: 12, style: .continuous)
-          .stroke(MeetingBarTheme.accent.opacity(0.20), lineWidth: 1)
-      }
-    }
     .onTapGesture {
       onSelect()
     }
@@ -520,19 +488,11 @@ private struct LibraryWelcomeView: View {
 
   var body: some View {
     VStack(spacing: 24) {
-      ZStack {
-        Circle()
-          .fill(MeetingBarTheme.accent.opacity(0.09))
-          .frame(width: 142, height: 142)
-        Circle()
-          .stroke(MeetingBarTheme.accent.opacity(0.12), lineWidth: 1)
-          .frame(width: 108, height: 108)
-        MeetingBarLogo(size: 68)
-      }
+      MeetingBarLogo(size: 54)
 
       VStack(spacing: 8) {
         Text(hasRecordings ? "Choose a meeting" : "Remember every conversation")
-          .font(.system(size: 30, weight: .bold, design: .rounded))
+          .font(.system(size: 28, weight: .semibold))
         Text(
           hasRecordings
             ? "Its transcript, speakers, and source audio will appear here."
@@ -561,7 +521,12 @@ private struct LibraryWelcomeView: View {
 
       HStack(spacing: 22) {
         Label("Microphone + system audio", systemImage: "waveform")
-        Label("On-device transcription", systemImage: "lock.shield")
+        Label(
+          controller.transcriptionPreferences.provider == .onDevice
+            ? "On-device transcription" : "ElevenLabs transcription",
+          systemImage: controller.transcriptionPreferences.provider == .onDevice
+            ? "lock.shield" : "cloud"
+        )
       }
       .font(.caption)
       .foregroundStyle(.tertiary)

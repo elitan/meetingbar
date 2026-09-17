@@ -60,6 +60,7 @@ final class AppController {
   let transcriptionPreferences: TranscriptionPreferenceStore
 
   private let modelContext: ModelContext
+  private let userDefaults: UserDefaults
   private let audioPreservationService: AudioPreservationService
   private let recoveryService: RecordingRecoveryService
   private let bannerPresenter = AppBannerPresenter()
@@ -76,23 +77,27 @@ final class AppController {
   private var hasLaunched = false
 
   var onboardingComplete: Bool {
-    UserDefaults.standard.bool(forKey: "DidCompleteOnboarding")
+    userDefaults.bool(forKey: "DidCompleteOnboarding")
   }
 
   init(
     modelContext: ModelContext,
     fileStore: RecordingFileStore,
-    transcriptionSecretStore: (any TranscriptionSecretStoring)? = nil
+    transcriptionSecretStore: (any TranscriptionSecretStoring)? = nil,
+    userDefaults: UserDefaults = .standard
   ) {
     self.modelContext = modelContext
+    self.userDefaults = userDefaults
     self.fileStore = fileStore
     let transcriptionSecretStore =
       transcriptionSecretStore ?? LocalTranscriptionSecretStore(rootURL: fileStore.rootURL)
-    let microphonePreferences = MicrophonePreferenceStore()
+    let microphonePreferences = MicrophonePreferenceStore(userDefaults: userDefaults)
     self.microphonePreferences = microphonePreferences
-    meetingReminderPreferences = MeetingReminderPreferenceStore()
-    recordingSafetyPreferences = RecordingSafetyPreferenceStore()
-    transcriptionPreferences = TranscriptionPreferenceStore(secretStore: transcriptionSecretStore)
+    meetingReminderPreferences = MeetingReminderPreferenceStore(userDefaults: userDefaults)
+    recordingSafetyPreferences = RecordingSafetyPreferenceStore(userDefaults: userDefaults)
+    transcriptionPreferences = TranscriptionPreferenceStore(
+      userDefaults: userDefaults, secretStore: transcriptionSecretStore
+    )
     capture = AudioCaptureController(
       fileStore: fileStore,
       microphonePreferences: microphonePreferences
@@ -252,7 +257,7 @@ final class AppController {
   }
 
   func completeOnboarding() {
-    UserDefaults.standard.set(true, forKey: "DidCompleteOnboarding")
+    userDefaults.set(true, forKey: "DidCompleteOnboarding")
     refreshOnlineMeetingMonitoring()
   }
 
