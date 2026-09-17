@@ -4,6 +4,11 @@ import SwiftUI
 
 @MainActor
 final class AppBannerPresenter {
+  enum ContinuationKind {
+    case silence
+    case onlineMeetingEnded
+  }
+
   private enum Priority: Int {
     case information
     case meetingReminder
@@ -14,25 +19,45 @@ final class AppBannerPresenter {
   private var currentPriority: Priority?
   private var contentModel: AppBannerContent?
   private var dismissTask: Task<Void, Never>?
+  private var countdownTask: Task<Void, Never>?
+  private var automaticPrimaryAction = false
+  private var onPrimaryAction: (() -> Void)?
+  private var onSecondaryAction: (() -> Void)?
   private var presentationID = UUID()
+  private(set) var countdown: RecordingPromptCountdown?
+  private(set) var continuationKind: ContinuationKind?
 
   func presentMeetingReminder(
     applicationName: String,
-    onStartRecording: @escaping () -> Void
+    isPreview: Bool = false,
+    onStartRecording: @escaping () -> Void,
+    onCancel: (() -> Void)? = nil
   ) {
     present(
-      title: "\(applicationName) is using your microphone",
-      body: "Start a MeetingBar recording?",
+      title: isPreview ? "Preview: record this meeting?" : "Record this meeting?",
+      body: isPreview
+        ? "This is a preview. No audio will be recorded."
+        : "\(applicationName) is using your microphone. Choose Not Now to skip recording.",
       symbolName: "waveform.circle.fill",
-      primaryActionTitle: "Start Recording",
+      primaryActionTitle: RecordingPromptCountdown.Action.startRecording.buttonTitle,
       secondaryActionTitle: "Not Now",
       secondaryActionIsDestructive: false,
       priority: .meetingReminder,
       placement: .center,
-      duration: .seconds(30),
+      duration: nil,
+      countdown: RecordingPromptCountdown(
+        action: .startRecording,
+        totalSeconds: RecordingPromptCountdown.startDurationSeconds
+      ),
+      automaticPrimaryAction: true,
       onPrimaryAction: onStartRecording,
-      onSecondaryAction: nil
+      onSecondaryAction: onCancel
     )
+  }
+
+  func dismissMeetingReminder() {
+    guard currentPriority == .meetingReminder else { return }
+    dismiss()
   }
 
   func presentRecordingSilenceReminder(
@@ -42,26 +67,28 @@ final class AppBannerPresenter {
   ) {
     present(
       title: "Still recording?",
-      body: RecordingSilenceBannerText.message(secondsRemaining: secondsRemaining),
+      body: "No microphone or system audio for five minutes.",
       symbolName: "timer",
-      primaryActionTitle: "Keep Recording",
-      secondaryActionTitle: "Stop Now",
-      secondaryActionIsDestructive: true,
+      primaryActionTitle: RecordingPromptCountdown.Action.stopRecording.buttonTitle,
+      secondaryActionTitle: "Keep Recording",
+      secondaryActionIsDestructive: false,
       priority: .recordingContinuation,
       placement: .center,
       duration: nil,
-      onPrimaryAction: onKeepRecording,
-      onSecondaryAction: onStopRecording
+      countdown: RecordingPromptCountdown(
+        action: .stopRecording, totalSeconds: 30, secondsRemaining: secondsRemaining
+      ),
+      continuationKind: .silence,
+      onPrimaryAction: onStopRecording,
+      onSecondaryAction: onKeepRecording
     )
   }
 
   func updateRecordingSilenceReminder(secondsRemaining: Int) {
-    guard currentPriority == .recordingContinuation else {
+    guard continuationKind == .silence else {
       return
     }
-    contentModel?.message = RecordingSilenceBannerText.message(
-      secondsRemaining: secondsRemaining
-    )
+    synchronizeCountdown(secondsRemaining: secondsRemaining)
   }
 
   func presentOnlineMeetingEndedReminder(
@@ -71,38 +98,37 @@ final class AppBannerPresenter {
     onStopRecording: @escaping () -> Void
   ) {
     present(
-      title: "Still recording?",
-      body: OnlineMeetingEndedBannerText.message(
-        applicationName: applicationName,
-        secondsRemaining: secondsRemaining
-      ),
+      title: "Call ended?",
+      body: "\(applicationName) stopped using your microphone.",
       symbolName: "mic.slash.fill",
-      primaryActionTitle: "Keep Recording",
-      secondaryActionTitle: "Stop Now",
-      secondaryActionIsDestructive: true,
+      primaryActionTitle: RecordingPromptCountdown.Action.stopRecording.buttonTitle,
+      secondaryActionTitle: "Keep Recording",
+      secondaryActionIsDestructive: false,
       priority: .recordingContinuation,
       placement: .center,
       duration: nil,
-      onPrimaryAction: onKeepRecording,
-      onSecondaryAction: onStopRecording
+      countdown: RecordingPromptCountdown(
+        action: .stopRecording, totalSeconds: 30, secondsRemaining: secondsRemaining
+      ),
+      continuationKind: .onlineMeetingEnded,
+      onPrimaryAction: onStopRecording,
+      onSecondaryAction: onKeepRecording
     )
   }
 
   func updateOnlineMeetingEndedReminder(
-    applicationName: String,
     secondsRemaining: Int
   ) {
-    guard currentPriority == .recordingContinuation else {
+    guard continuationKind == .onlineMeetingEnded else {
       return
     }
-    contentModel?.message = OnlineMeetingEndedBannerText.message(
-      applicationName: applicationName,
-      secondsRemaining: secondsRemaining
-    )
+    synchronizeCountdown(secondsRemaining: secondsRemaining)
   }
 
-  func dismissRecordingContinuationReminder() {
-    guard currentPriority == .recordingContinuation else {
+  func dismissRecordingContinuationReminder(kind: ContinuationKind? = nil) {
+    guard currentPriority == .recordingContinuation,
+      kind == nil || kind == continuationKind
+    else {
       return
     }
     dismiss()
@@ -125,13 +151,52 @@ final class AppBannerPresenter {
   }
 
   func dismiss() {
+    presentationID = UUID()
     dismissTask?.cancel()
     dismissTask = nil
+    countdownTask?.cancel()
+    countdownTask = nil
+    countdown = nil
+    automaticPrimaryAction = false
+    onPrimaryAction = nil
+    onSecondaryAction = nil
+    continuationKind = nil
     panel?.orderOut(nil)
     panel?.close()
     panel = nil
     currentPriority = nil
     contentModel = nil
+  }
+
+  func performPrimaryAction() {
+    let action = onPrimaryAction
+    dismiss()
+    action?()
+  }
+
+  func performSecondaryAction() {
+    let action = onSecondaryAction
+    dismiss()
+    action?()
+  }
+
+  func advanceCountdown(at now: ContinuousClock.Instant) {
+    guard let countdown else { return }
+    contentModel?.countdown = countdown.display(at: now)
+    if now >= countdown.deadline, automaticPrimaryAction {
+      performPrimaryAction()
+    }
+  }
+
+  private func synchronizeCountdown(secondsRemaining: Int) {
+    guard let countdown else { return }
+    // The recording monitors own stop deadlines. Correct drift after a delayed tick.
+    self.countdown = RecordingPromptCountdown(
+      action: countdown.action,
+      totalSeconds: countdown.totalSeconds,
+      secondsRemaining: secondsRemaining
+    )
+    advanceCountdown(at: .now)
   }
 
   private func present(
@@ -144,6 +209,9 @@ final class AppBannerPresenter {
     priority: Priority,
     placement: AppBannerPlacement,
     duration: Duration?,
+    countdown: RecordingPromptCountdown? = nil,
+    automaticPrimaryAction: Bool = false,
+    continuationKind: ContinuationKind? = nil,
     onPrimaryAction: (() -> Void)?,
     onSecondaryAction: (() -> Void)?
   ) {
@@ -155,7 +223,12 @@ final class AppBannerPresenter {
     currentPriority = priority
     presentationID = UUID()
     let currentPresentationID = presentationID
-    let contentModel = AppBannerContent(message: body)
+    self.countdown = countdown
+    self.automaticPrimaryAction = automaticPrimaryAction
+    self.continuationKind = continuationKind
+    self.onPrimaryAction = onPrimaryAction
+    self.onSecondaryAction = onSecondaryAction
+    let contentModel = AppBannerContent(message: body, countdown: countdown?.display(at: .now))
     self.contentModel = contentModel
 
     let contentView = AppBannerView(
@@ -166,12 +239,12 @@ final class AppBannerPresenter {
       secondaryActionTitle: secondaryActionTitle,
       secondaryActionIsDestructive: secondaryActionIsDestructive,
       onSecondaryAction: { [weak self] in
-        self?.dismiss()
-        onSecondaryAction?()
+        guard self?.presentationID == currentPresentationID else { return }
+        self?.performSecondaryAction()
       },
       onPrimaryAction: { [weak self] in
-        self?.dismiss()
-        onPrimaryAction?()
+        guard self?.presentationID == currentPresentationID else { return }
+        self?.performPrimaryAction()
       }
     )
     .frame(width: 420)
@@ -182,7 +255,7 @@ final class AppBannerPresenter {
     hostingView.layoutSubtreeIfNeeded()
     let panelSize = CGSize(
       width: 420,
-      height: min(190, max(126, ceil(hostingView.fittingSize.height)))
+      height: max(126, ceil(hostingView.fittingSize.height))
     )
     hostingView.sizingOptions = []
     hostingView.frame = CGRect(origin: .zero, size: panelSize)
@@ -225,6 +298,16 @@ final class AppBannerPresenter {
     self.panel = panel
     panel.orderFrontRegardless()
 
+    if countdown != nil {
+      countdownTask = Task { [weak self] in
+        while !Task.isCancelled {
+          try? await Task.sleep(for: .milliseconds(100))
+          guard !Task.isCancelled, self?.presentationID == currentPresentationID else { return }
+          self?.advanceCountdown(at: .now)
+        }
+      }
+    }
+
     if let duration {
       dismissTask = Task { [weak self] in
         try? await Task.sleep(for: duration)
@@ -234,22 +317,6 @@ final class AppBannerPresenter {
         self?.dismiss()
       }
     }
-  }
-}
-
-enum RecordingSilenceBannerText {
-  static func message(secondsRemaining: Int) -> String {
-    let seconds = max(0, secondsRemaining)
-    let unit = seconds == 1 ? "second" : "seconds"
-    return "No microphone or system audio for five minutes.\nRecording will stop automatically in \(seconds) \(unit)."
-  }
-}
-
-enum OnlineMeetingEndedBannerText {
-  static func message(applicationName: String, secondsRemaining: Int) -> String {
-    let seconds = max(0, secondsRemaining)
-    let unit = seconds == 1 ? "second" : "seconds"
-    return "\(applicationName) stopped using your microphone.\nRecording will stop automatically in \(seconds) \(unit)."
   }
 }
 
@@ -292,14 +359,17 @@ private final class ActionableBannerPanel: NSPanel {
 
 @MainActor
 private final class AppBannerContent: ObservableObject {
-  @Published var message: String
+  let message: String
+  @Published var countdown: RecordingPromptCountdownDisplay?
 
-  init(message: String) {
+  init(message: String, countdown: RecordingPromptCountdownDisplay?) {
     self.message = message
+    self.countdown = countdown
   }
 }
 
 private struct AppBannerView: View {
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   let title: String
   @ObservedObject var content: AppBannerContent
   let symbolName: String
@@ -342,12 +412,37 @@ private struct AppBannerView: View {
         Spacer(minLength: 0)
       }
 
+      if let countdown = content.countdown {
+        VStack(alignment: .leading, spacing: 8) {
+          Text(countdown.message)
+            .font(.subheadline.weight(.semibold))
+            .monospacedDigit()
+          GeometryReader { geometry in
+            Capsule()
+              .fill(MeetingBarTheme.accent.opacity(0.14))
+              .overlay(alignment: .leading) {
+                Capsule()
+                  .fill(MeetingBarTheme.accentGradient)
+                  .frame(width: geometry.size.width * countdown.fractionRemaining)
+              }
+          }
+          .frame(height: 4)
+          .animation(
+            reduceMotion ? nil : .linear(duration: 0.1),
+            value: countdown.fractionRemaining
+          )
+          .accessibilityHidden(true)
+        }
+        .accessibilityElement(children: .combine)
+      }
+
       HStack(spacing: 8) {
         Spacer()
         Button(secondaryActionTitle, action: onSecondaryAction)
           .buttonStyle(
             AppBannerSecondaryButtonStyle(isDestructive: secondaryActionIsDestructive)
           )
+          .keyboardShortcut(.cancelAction)
         if let primaryActionTitle {
           Button(primaryActionTitle, action: onPrimaryAction)
             .buttonStyle(AppBannerPrimaryButtonStyle())

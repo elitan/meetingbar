@@ -29,12 +29,14 @@ private enum RecordingStopReason {
     case .silenceTimeout:
       (
         title: "Recording stopped automatically",
-        body: "MeetingBar saved the recording after five minutes of silence and started transcription."
+        body:
+          "MeetingBar saved the recording after five minutes of silence and started transcription."
       )
     case .onlineMeetingEnded(let applicationName):
       (
         title: "Recording stopped automatically",
-        body: "MeetingBar saved the recording after \(applicationName) stopped using the microphone and started transcription."
+        body:
+          "MeetingBar saved the recording after \(applicationName) stopped using the microphone and started transcription."
       )
     }
   }
@@ -67,6 +69,7 @@ final class AppController {
   private var onlineMeetingMonitor: OnlineMeetingMonitor!
   private var onlineMeetingEndMonitor = OnlineMeetingEndMonitor()
   private var recordingSilenceMonitor = RecordingSilenceMonitor()
+  private var pendingMeetingReminder: OnlineMeetingApplication?
   private var activeRecordingID: UUID?
   private var onlineMeetingEndTask: Task<Void, Never>?
   private var recordingSilenceTask: Task<Void, Never>?
@@ -116,6 +119,9 @@ final class AppController {
     }
     onlineMeetingMonitor.onErrorChanged = { [weak self] message in
       self?.meetingReminderMonitorError = message
+      if message != nil {
+        self?.cancelMeetingStartReminder()
+      }
     }
     capture.onWarning = { [weak self] warning in
       self?.recordCaptureWarning(warning)
@@ -252,18 +258,15 @@ final class AppController {
 
   func setMeetingRemindersEnabled(_ enabled: Bool) {
     meetingReminderPreferences.setEnabled(enabled)
-    if enabled {
-      meetingReminderMonitorError = nil
-    } else {
-      meetingReminderMonitorError = nil
-      if capture.state == .idle {
-        bannerPresenter.dismiss()
-      }
+    meetingReminderMonitorError = nil
+    if !enabled {
+      cancelMeetingStartReminder()
     }
     refreshOnlineMeetingMonitoring()
   }
 
   func setMeetingRemindersIncludeBrowsers(_ includesBrowsers: Bool) {
+    cancelMeetingStartReminder()
     meetingReminderPreferences.setIncludesBrowsers(includesBrowsers)
     onlineMeetingMonitor.setIncludesBrowsers(includesBrowsers)
     if capture.state.isRecording, recordingSafetyPreferences.isEnabled {
@@ -293,7 +296,17 @@ final class AppController {
       lastErrorMessage = "Stop the current recording before testing a meeting reminder."
       return
     }
-    presentMeetingReminder(applicationName: "Test meeting")
+    cancelMeetingStartReminder()
+    bannerPresenter.presentMeetingReminder(
+      applicationName: "Test meeting",
+      isPreview: true,
+      onStartRecording: { [weak self] in
+        self?.bannerPresenter.presentInformation(
+          title: "Preview complete",
+          body: "A real meeting would start recording now. No audio was recorded."
+        )
+      }
+    )
   }
 
   func prioritizeMicrophone(_ microphoneID: String) {
@@ -468,6 +481,7 @@ final class AppController {
   }
 
   func quit() async {
+    cancelMeetingStartReminder()
     if capture.state.isRecording {
       await stopRecording()
     }
@@ -482,6 +496,7 @@ final class AppController {
 
   private func startRecording() async {
     lastErrorMessage = nil
+    cancelMeetingStartReminder()
     bannerPresenter.dismiss()
     let now = Date.now
     let recording = Recording(
@@ -510,8 +525,13 @@ final class AppController {
     }
   }
 
-  private func startRecordingFromReminder() async {
-    guard capture.state == .idle else {
+  private func startRecordingFromReminder(for application: OnlineMeetingApplication) async {
+    guard capture.state == .idle,
+      onboardingComplete,
+      meetingReminderPreferences.isEnabled,
+      meetingReminderMonitorError == nil,
+      onlineMeetingMonitor.isActive(application)
+    else {
       return
     }
     await startRecording()
@@ -519,21 +539,30 @@ final class AppController {
 
   private func handleOnlineMeetingDetected(_ application: OnlineMeetingApplication) {
     meetingReminderMonitorError = nil
-    guard meetingReminderPreferences.isEnabled, capture.state == .idle else {
+    guard onboardingComplete, meetingReminderPreferences.isEnabled,
+      capture.state == .idle, pendingMeetingReminder == nil
+    else {
       return
     }
-    presentMeetingReminder(applicationName: application.name)
+    pendingMeetingReminder = application
+    bannerPresenter.presentMeetingReminder(
+      applicationName: application.name,
+      onStartRecording: { [weak self] in
+        guard let self else { return }
+        self.pendingMeetingReminder = nil
+        Task { @MainActor in
+          await self.startRecordingFromReminder(for: application)
+        }
+      },
+      onCancel: { [weak self] in
+        self?.pendingMeetingReminder = nil
+      }
+    )
   }
 
-  private func presentMeetingReminder(applicationName: String) {
-    bannerPresenter.presentMeetingReminder(applicationName: applicationName) { [weak self] in
-      guard let self else {
-        return
-      }
-      Task { @MainActor in
-        await self.startRecordingFromReminder()
-      }
-    }
+  private func cancelMeetingStartReminder() {
+    pendingMeetingReminder = nil
+    bannerPresenter.dismissMeetingReminder()
   }
 
   private func stopRecording(reason: RecordingStopReason = .manual) async {
@@ -598,6 +627,7 @@ final class AppController {
     if isNeededForReminders || isNeededForRecordingSafety {
       onlineMeetingMonitor.start()
     } else {
+      cancelMeetingStartReminder()
       onlineMeetingMonitor.stop()
     }
   }
@@ -640,12 +670,15 @@ final class AppController {
     onlineMeetingEndTask?.cancel()
     onlineMeetingEndTask = nil
     _ = onlineMeetingEndMonitor.stop()
-    bannerPresenter.dismissRecordingContinuationReminder()
+    bannerPresenter.dismissRecordingContinuationReminder(kind: .onlineMeetingEnded)
   }
 
   private func observeOnlineMeetingApplications(
     _ applications: Set<OnlineMeetingApplication>
   ) {
+    if let pendingMeetingReminder, !applications.contains(pendingMeetingReminder) {
+      cancelMeetingStartReminder()
+    }
     let action = onlineMeetingEndMonitor.observe(
       activeApplications: applications,
       at: ContinuousClock.now
@@ -658,6 +691,8 @@ final class AppController {
     case .none:
       return
     case .presentPrompt(let applicationName, let secondsRemaining):
+      // The call-ended prompt takes priority; never leave an unseen silence timer armed.
+      _ = recordingSilenceMonitor.keepRecording(at: .now)
       bannerPresenter.presentOnlineMeetingEndedReminder(
         applicationName: applicationName,
         secondsRemaining: secondsRemaining,
@@ -668,13 +703,12 @@ final class AppController {
           self?.stopRecordingFromOnlineMeetingEndedPrompt()
         }
       )
-    case .updatePrompt(let applicationName, let secondsRemaining):
+    case .updatePrompt(_, let secondsRemaining):
       bannerPresenter.updateOnlineMeetingEndedReminder(
-        applicationName: applicationName,
         secondsRemaining: secondsRemaining
       )
     case .dismissPrompt:
-      bannerPresenter.dismissRecordingContinuationReminder()
+      bannerPresenter.dismissRecordingContinuationReminder(kind: .onlineMeetingEnded)
     case .stopRecording(let applicationName):
       onlineMeetingEndTask?.cancel()
       onlineMeetingEndTask = nil
@@ -686,6 +720,7 @@ final class AppController {
   }
 
   private func keepRecordingAfterOnlineMeetingEndedPrompt() {
+    _ = recordingSilenceMonitor.keepRecording(at: .now)
     let action = onlineMeetingEndMonitor.keepRecording()
     handleOnlineMeetingEndAction(action)
   }
@@ -722,7 +757,7 @@ final class AppController {
     recordingSilenceTask?.cancel()
     recordingSilenceTask = nil
     _ = recordingSilenceMonitor.stop()
-    bannerPresenter.dismissRecordingContinuationReminder()
+    bannerPresenter.dismissRecordingContinuationReminder(kind: .silence)
   }
 
   private func observeRecordingLevels(_ levels: CaptureLevels) {
@@ -735,6 +770,10 @@ final class AppController {
     case .none:
       return
     case .presentPrompt(let secondsRemaining):
+      guard bannerPresenter.continuationKind != .onlineMeetingEnded else {
+        _ = recordingSilenceMonitor.keepRecording(at: .now)
+        return
+      }
       bannerPresenter.presentRecordingSilenceReminder(
         secondsRemaining: secondsRemaining,
         onKeepRecording: { [weak self] in
@@ -747,7 +786,7 @@ final class AppController {
     case .updatePrompt(let secondsRemaining):
       bannerPresenter.updateRecordingSilenceReminder(secondsRemaining: secondsRemaining)
     case .dismissPrompt:
-      bannerPresenter.dismissRecordingContinuationReminder()
+      bannerPresenter.dismissRecordingContinuationReminder(kind: .silence)
     case .stopRecording:
       recordingSilenceTask?.cancel()
       recordingSilenceTask = nil

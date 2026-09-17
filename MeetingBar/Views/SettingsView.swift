@@ -138,9 +138,9 @@ struct SettingsView: View {
       Divider()
 
       SettingToggleRow(
-        title: "Prompt when an online meeting starts",
+        title: "Start online meetings automatically",
         detail:
-          "Show a centered reminder when Zoom, Microsoft Teams, or an included browser begins using the microphone.",
+          "When Zoom, Teams, or an included browser uses the microphone, show a 15-second countdown before recording. Choose Not Now to skip; leaving the call cancels it.",
         isOn: Binding(
           get: { controller.meetingReminderPreferences.isEnabled },
           set: { controller.setMeetingRemindersEnabled($0) }

@@ -185,6 +185,7 @@ final class OnlineMeetingMonitor {
   private var stateMachine: OnlineMeetingReminderStateMachine
   private var pollingTask: Task<Void, Never>?
   private var lastReportedFailure: String?
+  private var lastSuccessfulSnapshotAt: ContinuousClock.Instant?
 
   init(
     processProvider: AudioInputProcessProviding = CoreAudioInputProcessProvider(),
@@ -220,6 +221,17 @@ final class OnlineMeetingMonitor {
     stateMachine.reset()
     activeApplications = []
     lastReportedFailure = nil
+    lastSuccessfulSnapshotAt = nil
+  }
+
+  func isActive(
+    _ application: OnlineMeetingApplication,
+    at now: ContinuousClock.Instant = .now
+  ) -> Bool {
+    guard let lastSuccessfulSnapshotAt, lastReportedFailure == nil else { return false }
+    // Never auto-start from stale process metadata if polling fails or stalls.
+    return now - lastSuccessfulSnapshotAt <= .seconds(2)
+      && activeApplications.contains(application)
   }
 
   func setIncludesBrowsers(_ includesBrowsers: Bool) {
@@ -229,6 +241,7 @@ final class OnlineMeetingMonitor {
     self.includesBrowsers = includesBrowsers
     stateMachine.reset()
     activeApplications = []
+    lastSuccessfulSnapshotAt = nil
   }
 
   private func poll() async {
@@ -241,8 +254,11 @@ final class OnlineMeetingMonitor {
       }
     }.value
 
+    guard !Task.isCancelled else { return }
+
     switch snapshot {
     case .success(let processes):
+      lastSuccessfulSnapshotAt = .now
       if lastReportedFailure != nil {
         onErrorChanged?(nil)
       }

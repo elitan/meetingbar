@@ -220,19 +220,24 @@ final class OnlineMeetingReminderTests: XCTestCase {
     XCTAssertEqual(monitor.tick(at: start + .seconds(600)), .none)
   }
 
-  func testMeetingEndedBannerUsesApplicationNameAndCountdownGrammar() {
-    XCTAssertTrue(
-      OnlineMeetingEndedBannerText.message(
-        applicationName: "Zoom",
-        secondsRemaining: 30
-      ).contains("Zoom")
+  func testOnlyFreshActiveSnapshotsAllowAutomaticStart() async throws {
+    let zoom = try XCTUnwrap(application(bundleID: "us.zoom.xos"))
+    let monitor = OnlineMeetingMonitor(
+      processProvider: StaticInputProcessProvider(),
+      includesBrowsers: false,
+      pollInterval: .seconds(60)
     )
-    XCTAssertTrue(
-      OnlineMeetingEndedBannerText.message(
-        applicationName: "Zoom",
-        secondsRemaining: 1
-      ).hasSuffix("1 second.")
-    )
+    defer { monitor.stop() }
+    XCTAssertFalse(monitor.isActive(zoom))
+    let snapshotReceived = expectation(description: "Microphone snapshot")
+    monitor.onActiveApplicationsChanged = { _ in snapshotReceived.fulfill() }
+    monitor.start()
+    await fulfillment(of: [snapshotReceived], timeout: 2)
+
+    XCTAssertTrue(monitor.isActive(zoom))
+    XCTAssertFalse(monitor.isActive(zoom, at: .now + .seconds(3)))
+    monitor.stop()
+    XCTAssertFalse(monitor.isActive(zoom))
   }
 
   func testPreferencesDefaultOnAndPersist() {
@@ -290,5 +295,11 @@ final class OnlineMeetingReminderTests: XCTestCase {
     }
     defaults.removePersistentDomain(forName: suiteName)
     return (defaults, suiteName)
+  }
+}
+
+private struct StaticInputProcessProvider: AudioInputProcessProviding {
+  func activeInputProcesses() throws -> [ActiveAudioInputProcess] {
+    [ActiveAudioInputProcess(processID: 1, bundleID: "us.zoom.xos")]
   }
 }

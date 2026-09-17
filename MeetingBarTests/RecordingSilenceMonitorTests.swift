@@ -132,11 +132,13 @@ final class RecordingSilenceMonitorTests: XCTestCase {
   }
 
   func testCountdownMessageUsesSingularAndPluralSeconds() {
+    let now = ContinuousClock.now
+    let countdown = RecordingPromptCountdown(action: .stopRecording, totalSeconds: 30, now: now)
     XCTAssertTrue(
-      RecordingSilenceBannerText.message(secondsRemaining: 30).hasSuffix("30 seconds.")
+      countdown.display(at: now).message.hasSuffix("30 seconds.")
     )
     XCTAssertTrue(
-      RecordingSilenceBannerText.message(secondsRemaining: 1).hasSuffix("1 second.")
+      countdown.display(at: now + .seconds(29)).message.hasSuffix("1 second.")
     )
   }
 

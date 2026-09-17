@@ -250,12 +250,16 @@ struct OnboardingView: View {
                   Divider()
 
                   Toggle(
-                    "Remind me when an online meeting starts",
+                    "Start online meetings after a 15-second countdown",
                     isOn: Binding(
                       get: { controller.meetingReminderPreferences.isEnabled },
                       set: { controller.setMeetingRemindersEnabled($0) }
                     )
                   )
+
+                  Text("Choose Not Now in the reminder to skip recording.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                   Toggle(
                     "Include browser calls such as Google Meet",
