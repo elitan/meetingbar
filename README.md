@@ -51,7 +51,7 @@ Before transcription, quiet tracks are raised toward a speech-safe level without
 
 Existing recordings with retained audio can be upgraded from the meeting detail view with **Detect Speakers**. This re-runs transcription and speaker detection without changing the source audio.
 
-Meeting metadata is stored with SwiftData. Audio and model files remain inside MeetingBar's Application Support container. Source audio and transcripts are kept indefinitely until you explicitly delete the meeting, which removes both.
+Meeting metadata is stored with SwiftData. Audio and model files remain inside MeetingBar's Application Support container. By default, meetings stay until manually deleted. In **Settings → General → Storage**, optionally enable **Automatically delete meetings**, choose 1–3,650 days (30 by default), and apply. A confirmation warns that existing expired meetings will be deleted immediately. The cutoff is elapsed 24-hour days since the meeting ended; pinned, queued, and failed meetings are included. Active recordings and transcriptions are deferred until finished. Cleanup runs on launch, hourly while the app is running, and when transcription becomes idle. If the Mac/app is off, cleanup resumes on the next launch. This permanently removes the transcript, library entry, original microphone/system audio, and balanced playback files. It does not purge exported copies, macOS backups, models, settings, or cloud-provider records, and is not a secure-erasure guarantee.
 
 ## Release installation
 

@@ -6,6 +6,44 @@ import XCTest
 
 @MainActor
 final class RecordingDeletionTests: XCTestCase {
+  func testAutomaticRetentionDeletesExpiredMeetingsAndAllFilesOnlyWhenEnabled() throws {
+    try withFixture { context, controller, store in
+      let now = Date.now
+      let old = now.addingTimeInterval(-31 * 86_400)
+      var expiredIDs: [UUID] = []
+      for status in [RecordingStatus.ready, .queued, .failed] {
+        let recording = Recording(
+          title: "Expired fixture", isPinned: true, endedAt: old,
+          status: status, transcript: "Disposable transcript")
+        context.insert(recording)
+        expiredIDs.append(recording.id)
+        try FileManager.default.createDirectory(
+          at: store.directoryURL(for: recording.id), withIntermediateDirectories: true)
+        for name in ["audio.wav", "microphone.wav", "system.wav", "playback-balanced-v1.wav"] {
+          try Data([1, 2]).write(to: store.directoryURL(for: recording.id).appending(path: name))
+        }
+      }
+      let protected = [
+        Recording(title: "Recent", endedAt: now, status: .ready),
+        Recording(title: "Recording", status: .queued),
+        Recording(title: "Processing", endedAt: old, status: .transcribing),
+      ]
+      for recording in protected { context.insert(recording) }
+      try context.save()
+      XCTAssertEqual(controller.runMeetingRetention(now: now), 0)
+      XCTAssertEqual(try context.fetchCount(FetchDescriptor<Recording>()), 6)
+      controller.retentionPreferences.update(enabled: true, days: 30)
+      XCTAssertEqual(controller.runMeetingRetention(now: now), 3)
+      XCTAssertEqual(
+        Set(try context.fetch(FetchDescriptor<Recording>()).map(\.id)), Set(protected.map(\.id)))
+      for id in expiredIDs {
+        XCTAssertFalse(FileManager.default.fileExists(atPath: store.directoryURL(for: id).path))
+      }
+      XCTAssertEqual(controller.runMeetingRetention(now: now), 0)
+      XCTAssertNil(controller.retentionError)
+    }
+  }
+
   func testDeletingMeetingRemovesItsTranscriptAndAllAudioButKeepsOtherMeetings() throws {
     try withFixture { context, controller, store in
       let target = Recording(

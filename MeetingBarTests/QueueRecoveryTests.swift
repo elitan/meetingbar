@@ -1,10 +1,31 @@
 import Foundation
 import SwiftData
 import XCTest
+
 @testable import MeetingBar
 
 @MainActor
 final class QueueRecoveryTests: XCTestCase {
+  func testDeletedQueuedMeetingIsSkippedBeforeProcessing() async {
+    let idle = expectation(description: "Queue becomes idle")
+    let queue = TranscriptionQueue(
+      modelsURL: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString),
+      secretStore: EmptyTranscriptionSecretStore()
+    ) { event in
+      switch event {
+      case .started: return false
+      case .idle: idle.fulfill()
+      default: XCTFail("Deleted meeting must not begin transcription or model preparation")
+      }
+      return true
+    }
+    await queue.enqueue(
+      TranscriptionJob(
+        recordingID: UUID(), sources: [],
+        configuration: TranscriptionConfiguration(language: .automatic, quality: .bestAccuracy)))
+    await fulfillment(of: [idle], timeout: 2)
+  }
+
   func testAbandonedTranscribingJobReturnsToQueued() throws {
     let configuration = ModelConfiguration(isStoredInMemoryOnly: true)
     let container = try ModelContainer(for: Recording.self, configurations: configuration)

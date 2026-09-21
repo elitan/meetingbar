@@ -7,7 +7,7 @@ struct LibraryView: View {
   @State private var selectedRecordingID: UUID?
   @State private var pendingDeletion: Recording?
   @State private var deletionError: String?
-  @State private var audioPlayback = AudioPlaybackController()
+  private var audioPlayback: AudioPlaybackController { controller.audioPlayback }
   let controller: AppController
   @Bindable var navigation: MeetingBarNavigation
 

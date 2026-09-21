@@ -113,6 +113,11 @@ final class AudioPlaybackController {
     currentTime = clampedTime
   }
 
+  func unload(recordingID: UUID) {
+    guard preparedRecordingID == recordingID else { return }
+    unload()
+  }
+
   func unload() {
     preparationTask?.cancel()
     preparationTask = nil

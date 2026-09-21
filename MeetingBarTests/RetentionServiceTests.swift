@@ -5,6 +5,41 @@ import XCTest
 
 @MainActor
 final class RetentionServiceTests: XCTestCase {
+  func testRetentionBoundaryAndProtectedWork() {
+    let end = Date(timeIntervalSince1970: 1_000)
+    let cutoff = end.addingTimeInterval(30 * 86_400)
+    for status in RecordingStatus.allCases {
+      let recording = Recording(title: "Fixture", isPinned: true, endedAt: end, status: status)
+      XCTAssertFalse(
+        MeetingRetentionPolicy.isExpired(recording, days: 30, now: cutoff.addingTimeInterval(-1)))
+      XCTAssertEqual(
+        MeetingRetentionPolicy.isExpired(recording, days: 30, now: cutoff), status != .transcribing)
+      XCTAssertEqual(
+        MeetingRetentionPolicy.isExpired(recording, days: 30, now: cutoff.addingTimeInterval(1)),
+        status != .transcribing)
+      XCTAssertFalse(MeetingRetentionPolicy.isExpired(recording, days: 0, now: cutoff))
+      recording.endedAt = nil
+      XCTAssertFalse(MeetingRetentionPolicy.isExpired(recording, days: 30, now: cutoff))
+    }
+  }
+
+  func testPreferencesDefaultOffPersistAndRejectInvalidLimits() throws {
+    let suite = "MeetingBar.RetentionTests.\(UUID().uuidString)"
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let preferences = MeetingRetentionPreferences(userDefaults: defaults)
+    XCTAssertFalse(preferences.isEnabled)
+    XCTAssertEqual(preferences.days, 30)
+    preferences.update(enabled: true, days: 45)
+    let reloaded = MeetingRetentionPreferences(userDefaults: defaults)
+    XCTAssertTrue(reloaded.isEnabled)
+    XCTAssertEqual(reloaded.days, 45)
+    reloaded.update(enabled: true, days: -1)
+    XCTAssertEqual(reloaded.days, 45)
+    defaults.set(0, forKey: "MeetingRetentionDays")
+    XCTAssertFalse(MeetingRetentionPreferences(userDefaults: defaults).isEnabled)
+  }
+
   func testLegacyExpiryDatesAreClearedWithoutChangingRetainedAudio() throws {
     let container = try makeContainer()
     let context = container.mainContext

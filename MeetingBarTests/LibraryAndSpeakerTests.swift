@@ -5,6 +5,10 @@ import XCTest
 
 @MainActor
 final class LibraryAndSpeakerTests: XCTestCase {
+  func testSettingsSidebarShowsGeneralFirst() {
+    XCTAssertEqual(SettingsSection.allCases, [.general, .capture, .transcription])
+  }
+
   func testProductionLaunchDoesNotUseTheTestRuntime() {
     XCTAssertFalse(MeetingBarRuntime.isRunningTests(environment: [:]))
   }

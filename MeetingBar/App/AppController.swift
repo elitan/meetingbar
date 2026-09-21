@@ -53,6 +53,9 @@ final class AppController {
   private(set) var meetingReminderMonitorError: String?
 
   let capture: AudioCaptureController
+  let audioPlayback = AudioPlaybackController()
+  let retentionPreferences: MeetingRetentionPreferences
+  private(set) var retentionError: String?
   let fileStore: RecordingFileStore
   let meetingReminderPreferences: MeetingReminderPreferenceStore
   let microphonePreferences: MicrophonePreferenceStore
@@ -75,6 +78,7 @@ final class AppController {
   private var onlineMeetingEndTask: Task<Void, Never>?
   private var recordingSilenceTask: Task<Void, Never>?
   private var hasLaunched = false
+  private var retentionTask: Task<Void, Never>?
 
   var onboardingComplete: Bool {
     userDefaults.bool(forKey: "DidCompleteOnboarding")
@@ -88,6 +92,7 @@ final class AppController {
   ) {
     self.modelContext = modelContext
     self.userDefaults = userDefaults
+    retentionPreferences = MeetingRetentionPreferences(userDefaults: userDefaults)
     self.fileStore = fileStore
     let transcriptionSecretStore =
       transcriptionSecretStore ?? LocalTranscriptionSecretStore(rootURL: fileStore.rootURL)
@@ -165,9 +170,10 @@ final class AppController {
     microphonePreferences.refreshDevices()
 
     do {
-      let recovered = try recoveryService.recoverPartialRecordings()
+      _ = try recoveryService.recoverPartialRecordings()
       _ = try recoveryService.resetAbandonedJobs()
       try audioPreservationService.clearLegacyExpiryDates()
+      runMeetingRetention()
 
       let recordings = try modelContext.fetch(FetchDescriptor<Recording>())
       await transcriptionQueue.reconcileRemoteCleanup(
@@ -175,7 +181,7 @@ final class AppController {
         readyRecordingIDs: Set(recordings.filter { $0.status == .ready }.map(\.id))
       )
       let queued = recordings.filter { $0.status == .queued && $0.audioRelativePath != nil }
-      let pendingTranscriptions = recovered + queued
+      let pendingTranscriptions = queued
       for recording in pendingTranscriptions {
         guard let relativePath = recording.audioRelativePath else {
           continue
@@ -206,6 +212,46 @@ final class AppController {
     }
 
     refreshOnlineMeetingMonitoring()
+    retentionTask = Task { [weak self] in
+      while !Task.isCancelled {
+        do { try await Task.sleep(for: .seconds(3600)) } catch { return }
+        self?.runMeetingRetention()
+      }
+    }
+  }
+
+  func updateMeetingRetention(enabled: Bool, days: Int) {
+    retentionPreferences.update(enabled: enabled, days: days)
+    runMeetingRetention()
+  }
+
+  @discardableResult
+  func runMeetingRetention(now: Date = .now) -> Int {
+    retentionError = nil
+    guard retentionPreferences.isEnabled else { return 0 }
+    var deletedCount = 0
+    var failures = 0
+    do {
+      let recordings = try modelContext.fetch(FetchDescriptor<Recording>())
+      for recording in recordings
+      where recording.id != activeRecordingID
+        && MeetingRetentionPolicy.isExpired(recording, days: retentionPreferences.days, now: now)
+      {
+        do {
+          try delete(recording)
+          deletedCount += 1
+        } catch {
+          failures += 1
+        }
+      }
+      if failures > 0 {
+        retentionError =
+          "Could not delete \(failures) expired meeting(s). MeetingBar will retry automatically."
+      }
+    } catch {
+      retentionError = "Automatic deletion could not finish: \(error.localizedDescription)"
+    }
+    return deletedCount
   }
 
   func toggleRecording() async {
@@ -460,6 +506,7 @@ final class AppController {
     guard recording.id != activeRecordingID else {
       throw AudioCaptureError.stateConflict
     }
+    audioPlayback.unload(recordingID: recording.id)
     try fileStore.deleteRecordingFiles(for: recording.id)
     modelContext.delete(recording)
     try modelContext.save()
@@ -487,6 +534,7 @@ final class AppController {
   }
 
   func quit() async {
+    retentionTask?.cancel()
     cancelMeetingStartReminder()
     if capture.state.isRecording {
       await stopRecording()
@@ -864,6 +912,7 @@ final class AppController {
       recording.errorMessage = nil
       return save(recording)
     case .idle:
+      runMeetingRetention()
       Task {
         await meetingTitleQueue.resumeProcessing()
       }

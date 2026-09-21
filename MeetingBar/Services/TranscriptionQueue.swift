@@ -189,14 +189,16 @@ actor TranscriptionQueue {
   private func processPendingJobs() async {
     while !pendingJobs.isEmpty {
       let job = pendingJobs.removeFirst()
-      _ = await eventHandler(
+      let shouldProcess = await eventHandler(
         .started(
           recordingID: job.recordingID,
           provider: job.configuration.provider,
           modelIdentifier: job.configuration.modelIdentifier
         )
       )
-      await process(job)
+      if shouldProcess {
+        await process(job)
+      }
       knownJobIDs.remove(job.recordingID)
     }
     processingTask = nil

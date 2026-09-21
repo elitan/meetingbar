@@ -7,6 +7,11 @@ struct SettingsView: View {
   @State private var screenGranted = AudioCaptureController.hasScreenPermission
   @State private var elevenLabsAPIKey = ""
   @State private var apiKeyFeedback: APIKeyFeedback?
+  @State private var retentionEnabled = false
+  @State private var retentionDaysText = "30"
+  @State private var confirmsRetention = false
+
+  private var retentionDays: Int { Int(retentionDaysText) ?? 0 }
 
   var body: some View {
     ZStack {
@@ -31,8 +36,20 @@ struct SettingsView: View {
     .frame(minWidth: 640, minHeight: 560)
     .meetingBarWindowTint()
     .onAppear {
+      retentionEnabled = controller.retentionPreferences.isEnabled
+      retentionDaysText = String(controller.retentionPreferences.days)
       refreshPermissionStatus()
       controller.refreshMicrophones()
+    }
+    .alert("Automatically delete old meetings?", isPresented: $confirmsRetention) {
+      Button("Cancel", role: .cancel) {}
+      Button("Apply and Delete Expired Meetings", role: .destructive) {
+        controller.updateMeetingRetention(enabled: retentionEnabled, days: retentionDays)
+      }
+    } message: {
+      Text(
+        "Meetings that ended at least \(retentionDays) days ago will be permanently deleted, including pinned meetings, transcripts, and all local audio. This applies to existing meetings immediately and cannot be undone. Active recordings and transcriptions finish first."
+      )
     }
   }
 
@@ -512,29 +529,50 @@ struct SettingsView: View {
       subtitle: "Keep recordings and searchable text on this Mac.",
       symbol: "internaldrive"
     ) {
-      HStack(alignment: .top, spacing: 12) {
-        MeetingBarIconTile(symbol: "text.document", color: MeetingBarTheme.mint, size: 36)
-        VStack(alignment: .leading, spacing: 3) {
-          Text("Transcripts")
-            .font(.subheadline.weight(.semibold))
-          Text("Kept indefinitely until you delete the meeting.")
-            .font(.caption)
-            .foregroundStyle(.secondary)
+      Toggle("Automatically delete meetings", isOn: $retentionEnabled)
+      LabeledContent("Delete after") {
+        TextField("Days", text: $retentionDaysText)
+          .textFieldStyle(.roundedBorder)
+          .frame(width: 80)
+          .accessibilityLabel("Meeting retention in days")
+          .disabled(!retentionEnabled)
+        Text("days")
+      }
+      Text(
+        "Days since the meeting ended, including pinned and failed meetings. Removes the transcript and all local audio. Checked on launch and hourly while MeetingBar is running; active recordings and transcriptions finish first."
+      )
+      .font(.caption)
+      .foregroundStyle(.secondary)
+      Text(
+        controller.retentionPreferences.isEnabled
+          ? "Currently deleting meetings after \(controller.retentionPreferences.days) days."
+          : "Currently keeping meetings until you delete them manually."
+      )
+      .font(.caption)
+      Button("Apply") {
+        if retentionEnabled {
+          confirmsRetention = true
+        } else {
+          controller.updateMeetingRetention(enabled: false, days: retentionDays)
         }
       }
-      Divider()
-      HStack(alignment: .top, spacing: 12) {
-        MeetingBarIconTile(symbol: "waveform", color: MeetingBarTheme.coral, size: 36)
-        VStack(alignment: .leading, spacing: 3) {
-          Text("Source audio")
-            .font(.subheadline.weight(.semibold))
-          Text(
-            "Kept indefinitely on this Mac. Deleting a meeting removes both its transcript and audio."
-          )
-          .font(.caption)
-          .foregroundStyle(.secondary)
-        }
+      .buttonStyle(MeetingBarSecondaryButtonStyle())
+      .disabled(
+        !MeetingRetentionPolicy.allowedDays.contains(retentionDays)
+          || (retentionEnabled == controller.retentionPreferences.isEnabled
+            && retentionDays == controller.retentionPreferences.days)
+      )
+      if !MeetingRetentionPolicy.allowedDays.contains(retentionDays) {
+        Text("Choose between 1 and 3,650 days.").foregroundStyle(MeetingBarTheme.amber)
       }
+      if let error = controller.retentionError {
+        Text(error).foregroundStyle(MeetingBarTheme.amber)
+      }
+      Text(
+        "Only MeetingBar's local meeting data is removed—not exported copies, system backups, models, settings, or cloud-provider records."
+      )
+      .font(.caption)
+      .foregroundStyle(.secondary)
     }
 
     SettingsCard(
@@ -738,9 +776,9 @@ private enum APIKeyFeedback {
 }
 
 enum SettingsSection: String, CaseIterable, Identifiable {
+  case general
   case capture
   case transcription
-  case general
 
   var id: Self { self }
 

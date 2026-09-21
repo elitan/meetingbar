@@ -362,7 +362,10 @@ struct RecordingDetailView: View {
 
           Spacer()
           Image(systemName: "internaldrive")
-            .help("Original audio stays on this Mac until you delete this meeting")
+            .help(
+              controller.retentionPreferences.isEnabled
+                ? "Meeting data is automatically deleted after \(controller.retentionPreferences.days) days."
+                : "Original audio stays on this Mac until you delete this meeting")
         }
         .font(.caption)
         .foregroundStyle(.secondary)
