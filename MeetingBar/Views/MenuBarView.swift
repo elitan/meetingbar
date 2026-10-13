@@ -1,4 +1,6 @@
 import AppKit
+import KeyboardShortcuts
+import SwiftData
 import SwiftUI
 
 struct MenuBarStatusLabel: View {
@@ -37,8 +39,22 @@ struct MenuBarStatusLabel: View {
 
 struct MenuBarView: View {
   @Environment(\.openWindow) private var openWindow
+  @Query(MenuBarView.recentDescriptor) private var latestRecordings: [Recording]
   let controller: AppController
   let navigation: MeetingBarNavigation
+
+  private static var recentDescriptor: FetchDescriptor<Recording> {
+    var descriptor = FetchDescriptor<Recording>(
+      sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
+    )
+    descriptor.fetchLimit = 4
+    return descriptor
+  }
+
+  /// The live recording already has the card above, so list the meetings before it.
+  private var recentRecordings: [Recording] {
+    Array(latestRecordings.filter { !$0.isCapturing }.prefix(3))
+  }
 
   var body: some View {
     ZStack {
@@ -75,6 +91,10 @@ struct MenuBarView: View {
               canDismiss: true
             )
           }
+
+          if !recentRecordings.isEmpty {
+            recentSection
+          }
         }
         .padding(14)
 
@@ -101,17 +121,6 @@ struct MenuBarView: View {
           .foregroundStyle(statusColor)
       }
       Spacer()
-      Button {
-        openSettingsWindow()
-      } label: {
-        Image(systemName: "gearshape")
-          .font(.system(size: 14, weight: .semibold))
-          .foregroundStyle(.secondary)
-          .frame(width: 30, height: 30)
-          .background(MeetingBarTheme.quietFill, in: RoundedRectangle(cornerRadius: 9))
-      }
-      .buttonStyle(.plain)
-      .help("Settings")
     }
   }
 
@@ -126,13 +135,16 @@ struct MenuBarView: View {
             .font(.subheadline.weight(.semibold))
         }
         Spacer()
-        Text(
-          controller.capture.state.isRecording
-            ? DurationText.string(seconds: controller.capture.elapsedSeconds)
-            : "MIC + MAC"
-        )
-        .font(.caption.monospacedDigit().weight(.semibold))
-        .foregroundStyle(.secondary)
+        if controller.capture.state.isRecording {
+          Text(DurationText.string(seconds: controller.capture.elapsedSeconds))
+            .font(.caption.monospacedDigit().weight(.semibold))
+            .foregroundStyle(.secondary)
+        } else if let shortcut = KeyboardShortcuts.getShortcut(for: .toggleMeetingRecording) {
+          Text(shortcut.description)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .help("Start or stop recording from any app")
+        }
       }
 
       MeetingBarAudioMeter(
@@ -220,6 +232,24 @@ struct MenuBarView: View {
       }
     }
     .buttonStyle(.plain)
+  }
+
+  private var recentSection: some View {
+    VStack(alignment: .leading, spacing: 2) {
+      Text("RECENT")
+        .font(.system(size: 10, weight: .medium))
+        .tracking(1)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 8)
+        .padding(.bottom, 2)
+
+      ForEach(recentRecordings) { recording in
+        MenuBarRecentRow(recording: recording) {
+          navigation.showRecording(recording.id)
+          MeetingBarApplicationPresentation.openWindow(id: "main", using: openWindow)
+        }
+      }
+    }
   }
 
   private var popoverFooter: some View {
@@ -338,5 +368,76 @@ struct MenuBarView: View {
   private func openSettingsWindow(section: SettingsSection? = nil) {
     navigation.showSettings(section)
     MeetingBarApplicationPresentation.openWindow(id: "main", using: openWindow)
+  }
+}
+
+private struct MenuBarRecentRow: View {
+  let recording: Recording
+  let open: () -> Void
+  @State private var isHovering = false
+
+  private var isProcessing: Bool {
+    recording.status == .queued || recording.status == .transcribing
+  }
+
+  private var detail: String {
+    switch recording.status {
+    case .queued:
+      "Waiting to transcribe…"
+    case .transcribing:
+      "Transcribing…"
+    case .failed:
+      "Transcription failed · open to retry"
+    case .ready:
+      "\(MeetingDateText.string(for: recording.startedAt)) · \(DurationText.compact(seconds: recording.durationSeconds))"
+    }
+  }
+
+  var body: some View {
+    Button(action: open) {
+      HStack(spacing: 10) {
+        Group {
+          if isProcessing {
+            ProgressView()
+              .controlSize(.mini)
+          } else {
+            Image(
+              systemName: recording.status == .failed
+                ? "exclamationmark.triangle.fill" : "text.alignleft"
+            )
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(recording.status == .failed ? MeetingBarTheme.amber : Color.secondary)
+          }
+        }
+        .frame(width: 16)
+
+        VStack(alignment: .leading, spacing: 1) {
+          Text(recording.title)
+            .font(.subheadline.weight(.medium))
+            .lineLimit(1)
+          Text(detail)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+        }
+
+        Spacer(minLength: 4)
+
+        Image(systemName: "chevron.right")
+          .font(.caption2.weight(.bold))
+          .foregroundStyle(.tertiary)
+          .opacity(isHovering ? 1 : 0)
+      }
+      .padding(.horizontal, 8)
+      .padding(.vertical, 6)
+      .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+      .background(
+        isHovering ? MeetingBarTheme.quietFill : Color.clear,
+        in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+      )
+    }
+    .buttonStyle(.plain)
+    .onHover { isHovering = $0 }
+    .help("Open in Library")
   }
 }

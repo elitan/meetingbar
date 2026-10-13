@@ -1,37 +1,52 @@
+import AppKit
+import KeyboardShortcuts
 import SwiftData
 import SwiftUI
 
 struct LibraryView: View {
   @Query(sort: \Recording.startedAt, order: .reverse) private var recordings: [Recording]
   @State private var searchText = ""
-  @State private var selectedRecordingID: UUID?
   @State private var pendingDeletion: Recording?
   @State private var deletionError: String?
+  @FocusState private var isSearchFocused: Bool
+  @FocusState private var isListFocused: Bool
   private var audioPlayback: AudioPlaybackController { controller.audioPlayback }
   let controller: AppController
   @Bindable var navigation: MeetingBarNavigation
 
+  private var searchQuery: String {
+    searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
   private var filteredRecordings: [Recording] {
-    let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !query.isEmpty else {
+    guard !searchQuery.isEmpty else {
       return recordings
     }
     return recordings.filter { recording in
-      recording.title.localizedCaseInsensitiveContains(query)
-        || recording.transcript.localizedCaseInsensitiveContains(query)
+      recording.title.localizedCaseInsensitiveContains(searchQuery)
+        || recording.transcript.localizedCaseInsensitiveContains(searchQuery)
     }
   }
 
-  private var pinnedRecordings: [Recording] {
-    filteredRecordings.filter(\.isPinned)
+  /// Date groups while browsing; a single flat result list while searching.
+  private var sections: [LibrarySection] {
+    guard !searchQuery.isEmpty else {
+      return LibraryGrouping.sections(for: recordings)
+    }
+    let results = filteredRecordings
+    guard !results.isEmpty else {
+      return []
+    }
+    return [
+      LibrarySection(
+        title: results.count == 1 ? "1 Result" : "\(results.count) Results",
+        recordings: results
+      )
+    ]
   }
 
-  private var unpinnedRecordings: [Recording] {
-    filteredRecordings.filter { !$0.isPinned }
-  }
-
-  private var orderedRecordings: [Recording] {
-    pinnedRecordings + unpinnedRecordings
+  private var selectedRecording: Recording? {
+    recordings.first(where: { $0.id == navigation.selectedRecordingID })
   }
 
   var body: some View {
@@ -43,11 +58,12 @@ struct LibraryView: View {
       case .library:
         ZStack {
           MeetingBarBackdrop()
-          if let recording = recordings.first(where: { $0.id == selectedRecordingID }) {
+          if let recording = selectedRecording {
             RecordingDetailView(
               recording: recording,
               controller: controller,
               audioPlayback: audioPlayback,
+              highlight: searchQuery,
               onDelete: { pendingDeletion = recording }
             )
           } else {
@@ -62,9 +78,13 @@ struct LibraryView: View {
     .meetingBarWindowTint()
     .onAppear {
       selectFirstRecordingIfNeeded()
+      focusSearchIfRequested()
     }
-    .onChange(of: orderedRecordings.map(\.id)) {
+    .onChange(of: recordings.map(\.id)) {
       selectFirstRecordingIfNeeded()
+    }
+    .onChange(of: navigation.wantsSearchFocus) {
+      focusSearchIfRequested()
     }
     .alert(
       "Delete this meeting?",
@@ -164,35 +184,83 @@ struct LibraryView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
 
-      ScrollView {
-        LazyVStack(alignment: .leading, spacing: 5) {
-          if filteredRecordings.isEmpty {
-            SidebarEmptyState(isSearching: !searchText.isEmpty)
-          } else {
-            if !pinnedRecordings.isEmpty {
-              sidebarSectionTitle("Pinned", symbol: "pin.fill")
-              recordingRows(pinnedRecordings)
+      if sections.isEmpty {
+        SidebarEmptyState(isSearching: !searchQuery.isEmpty)
+        Spacer(minLength: 0)
+      } else {
+        ScrollViewReader { proxy in
+          ScrollView {
+            LazyVStack(alignment: .leading, spacing: 5) {
+              ForEach(sections) { section in
+                sidebarSectionTitle(section.title)
+                ForEach(section.recordings) { recording in
+                  RecordingRow(
+                    recording: recording,
+                    controller: controller,
+                    searchQuery: searchQuery,
+                    isSelected: recording.id == navigation.selectedRecordingID,
+                    onDelete: { pendingDeletion = recording }
+                  ) {
+                    navigation.selectedRecordingID = recording.id
+                    isListFocused = true
+                  }
+                  .id(recording.id)
+                }
+              }
             }
-
-            if !unpinnedRecordings.isEmpty {
-              sidebarSectionTitle(
-                pinnedRecordings.isEmpty ? "Meetings" : "Recent",
-                symbol: "clock"
-              )
-              recordingRows(unpinnedRecordings)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 10)
+          }
+          // Keyboard support for the meeting list: arrows move, Delete asks to delete, Space plays.
+          .focusable()
+          .focusEffectDisabled()
+          .focused($isListFocused)
+          .onKeyPress(.upArrow) {
+            moveSelection(by: -1, proxy: proxy)
+          }
+          .onKeyPress(.downArrow) {
+            moveSelection(by: 1, proxy: proxy)
+          }
+          .onKeyPress(.space) {
+            // Leave Space alone while renaming a meeting inline.
+            guard !(NSApp.keyWindow?.firstResponder is NSTextView),
+              let recording = selectedRecording,
+              controller.audioURL(for: recording) != nil
+            else {
+              return .ignored
+            }
+            controller.togglePlayback(for: recording)
+            return .handled
+          }
+          .onDeleteCommand {
+            if let recording = selectedRecording, !recording.isCapturing {
+              pendingDeletion = recording
             }
           }
         }
-        .padding(.horizontal, 9)
-        .padding(.vertical, 10)
       }
     }
+  }
+
+  private func moveSelection(by offset: Int, proxy: ScrollViewProxy) -> KeyPress.Result {
+    guard !(NSApp.keyWindow?.firstResponder is NSTextView) else {
+      return .ignored
+    }
+    let ids = sections.flatMap { $0.recordings.map(\.id) }
+    guard !ids.isEmpty else {
+      return .ignored
+    }
+    let current = ids.firstIndex(where: { $0 == navigation.selectedRecordingID })
+    let next = current.map { min(max($0 + offset, 0), ids.count - 1) } ?? 0
+    navigation.selectedRecordingID = ids[next]
+    proxy.scrollTo(ids[next])
+    return .handled
   }
 
   private var settingsNavigation: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 5) {
-        sidebarSectionTitle("Settings", symbol: "slider.horizontal.3")
+        sidebarSectionTitle("Settings")
         ForEach(SettingsSection.allCases) { section in
           Button {
             navigation.showSettings(section)
@@ -232,6 +300,18 @@ struct LibraryView: View {
         .foregroundStyle(.tertiary)
       TextField("Search meetings", text: $searchText)
         .textFieldStyle(.plain)
+        .focused($isSearchFocused)
+        .onSubmit {
+          isListFocused = true
+        }
+        .onKeyPress(.downArrow) {
+          isListFocused = true
+          return .handled
+        }
+        .onExitCommand {
+          searchText = ""
+          isSearchFocused = false
+        }
       if !searchText.isEmpty {
         Button {
           searchText = ""
@@ -241,6 +321,17 @@ struct LibraryView: View {
         }
         .buttonStyle(.plain)
         .help("Clear search")
+      } else if !isSearchFocused {
+        Text("⌘F")
+          .font(.caption2.weight(.medium))
+          .foregroundStyle(.tertiary)
+          .padding(.horizontal, 5)
+          .padding(.vertical, 2)
+          .overlay {
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+              .stroke(MeetingBarTheme.subtleBorder, lineWidth: 1)
+          }
+          .accessibilityHidden(true)
       }
     }
     .font(.subheadline)
@@ -251,11 +342,14 @@ struct LibraryView: View {
     )
     .overlay {
       RoundedRectangle(cornerRadius: 8, style: .continuous)
-        .stroke(MeetingBarTheme.subtleBorder, lineWidth: 1)
+        .stroke(
+          isSearchFocused ? MeetingBarTheme.accent.opacity(0.35) : MeetingBarTheme.subtleBorder,
+          lineWidth: 1
+        )
     }
   }
 
-  private func sidebarSectionTitle(_ title: String, symbol: String) -> some View {
+  private func sidebarSectionTitle(_ title: String) -> some View {
     Text(title.uppercased())
       .font(.system(size: 10, weight: .medium))
       .tracking(1)
@@ -265,24 +359,9 @@ struct LibraryView: View {
       .padding(.bottom, 3)
   }
 
-  @ViewBuilder
-  private func recordingRows(_ rows: [Recording]) -> some View {
-    ForEach(rows) { recording in
-      RecordingRow(
-        recording: recording,
-        controller: controller,
-        isSelected: recording.id == selectedRecordingID,
-        onDelete: { pendingDeletion = recording }
-      ) {
-        navigation.showLibrary()
-        selectedRecordingID = recording.id
-      }
-    }
-  }
-
   private func delete(_ recording: Recording) {
     do {
-      if selectedRecordingID == recording.id {
+      if navigation.selectedRecordingID == recording.id {
         audioPlayback.unload()
       }
       try controller.delete(recording)
@@ -292,19 +371,129 @@ struct LibraryView: View {
   }
 
   private func selectFirstRecordingIfNeeded() {
-    guard
-      selectedRecordingID == nil
-        || !recordings.contains(where: { $0.id == selectedRecordingID })
-    else {
+    guard selectedRecording == nil else {
       return
     }
-    selectedRecordingID = orderedRecordings.first?.id ?? recordings.first?.id
+    navigation.selectedRecordingID = sections.first?.recordings.first?.id ?? recordings.first?.id
+  }
+
+  private func focusSearchIfRequested() {
+    guard navigation.wantsSearchFocus else {
+      return
+    }
+    navigation.wantsSearchFocus = false
+    Task { @MainActor in
+      isSearchFocused = true
+    }
+  }
+}
+
+struct LibrarySection: Identifiable {
+  let title: String
+  let recordings: [Recording]
+  var id: String { title }
+}
+
+enum LibraryGrouping {
+  /// Groups newest-first recordings into Pinned, then Today, Yesterday, Previous 7 Days,
+  /// Previous 30 Days, and one section per older month.
+  static func sections(
+    for recordings: [Recording],
+    now: Date = .now,
+    calendar: Calendar = .current,
+    locale: Locale = .current
+  ) -> [LibrarySection] {
+    var sections: [(title: String, recordings: [Recording])] = []
+    let pinned = recordings.filter(\.isPinned)
+    if !pinned.isEmpty {
+      sections.append(("Pinned", pinned))
+    }
+
+    let startOfToday = calendar.startOfDay(for: now)
+    func daysBefore(_ days: Int) -> Date {
+      calendar.date(byAdding: .day, value: -days, to: startOfToday) ?? startOfToday
+    }
+
+    for recording in recordings where !recording.isPinned {
+      let date = recording.startedAt
+      let title: String
+      if date >= startOfToday {
+        title = "Today"
+      } else if date >= daysBefore(1) {
+        title = "Yesterday"
+      } else if date >= daysBefore(7) {
+        title = "Previous 7 Days"
+      } else if date >= daysBefore(30) {
+        title = "Previous 30 Days"
+      } else {
+        var style = Date.FormatStyle(locale: locale).month(.wide)
+        if !calendar.isDate(date, equalTo: now, toGranularity: .year) {
+          style = style.year()
+        }
+        style.timeZone = calendar.timeZone
+        title = date.formatted(style)
+      }
+
+      // Recordings arrive newest first, so each group is a contiguous run.
+      if sections.last?.title == title {
+        sections[sections.count - 1].recordings.append(recording)
+      } else {
+        sections.append((title, [recording]))
+      }
+    }
+    return sections.map { LibrarySection(title: $0.title, recordings: $0.recordings) }
+  }
+}
+
+enum TranscriptSearch {
+  /// A short excerpt around the first match, without speaker labels, to show why a meeting matched.
+  static func snippet(in transcript: String, matching query: String, radius: Int = 40) -> String? {
+    let text =
+      transcript
+      .replacing(#/Speaker \d+:\s*/#, with: "")
+      .replacing(#/\s+/#, with: " ")
+    guard !query.isEmpty,
+      let match = text.range(of: query, options: [.caseInsensitive, .diacriticInsensitive])
+    else {
+      return nil
+    }
+    let start =
+      text.index(match.lowerBound, offsetBy: -radius, limitedBy: text.startIndex)
+      ?? text.startIndex
+    let end =
+      text.index(match.upperBound, offsetBy: radius, limitedBy: text.endIndex)
+      ?? text.endIndex
+    var snippet = text[start..<end].trimmingCharacters(in: .whitespaces)
+    if start > text.startIndex { snippet = "…" + snippet }
+    if end < text.endIndex { snippet += "…" }
+    return snippet
+  }
+
+  /// Applies `attributes` to every case-insensitive occurrence of `query` in `text`.
+  static func highlighted(
+    _ text: String,
+    matching query: String,
+    with attributes: AttributeContainer
+  ) -> AttributedString {
+    var attributed = AttributedString(text)
+    guard !query.isEmpty else {
+      return attributed
+    }
+    var searchStart = attributed.startIndex
+    while let range = attributed[searchStart...].range(
+      of: query, options: [.caseInsensitive, .diacriticInsensitive])
+    {
+      attributed[range].mergeAttributes(attributes)
+      searchStart = range.upperBound
+    }
+    return attributed
   }
 }
 
 private struct RecordingRow: View {
   @Bindable var recording: Recording
   let controller: AppController
+  let searchQuery: String
   let isSelected: Bool
   let onDelete: () -> Void
   let onSelect: () -> Void
@@ -327,8 +516,22 @@ private struct RecordingRow: View {
     }
   }
 
+  /// Shown when a search matched the transcript rather than the title.
+  private var searchSnippet: AttributedString? {
+    guard !searchQuery.isEmpty,
+      !recording.title.localizedCaseInsensitiveContains(searchQuery),
+      let snippet = TranscriptSearch.snippet(in: recording.transcript, matching: searchQuery)
+    else {
+      return nil
+    }
+    var match = AttributeContainer()
+    match.foregroundColor = MeetingBarTheme.text
+    match.font = .caption.weight(.semibold)
+    return TranscriptSearch.highlighted(snippet, matching: searchQuery, with: match)
+  }
+
   var body: some View {
-    VStack(alignment: .leading, spacing: 5) {
+    VStack(alignment: .leading, spacing: 4) {
       HStack(spacing: 6) {
         if isRenaming {
           TextField("Meeting title", text: $draftTitle)
@@ -387,15 +590,23 @@ private struct RecordingRow: View {
           .frame(width: 5, height: 5)
         if recording.status != .ready || recording.isCapturing {
           Text(recording.isCapturing ? "Recording" : recording.status.label)
+          Text("·")
         }
-        Text(recording.startedAt, format: .dateTime.month(.abbreviated).day().hour().minute())
+        Text(MeetingDateText.string(for: recording.startedAt))
         Text("·")
-        Text(DurationText.string(seconds: recording.durationSeconds))
+        Text(DurationText.compact(seconds: recording.durationSeconds))
           .monospacedDigit()
       }
       .font(.caption2)
       .foregroundStyle(.secondary)
       .lineLimit(1)
+
+      if let searchSnippet {
+        Text(searchSnippet)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .lineLimit(2)
+      }
     }
     .padding(.horizontal, 10)
     .padding(.vertical, 9)
@@ -521,15 +732,24 @@ private struct SidebarRecordingControl: View {
           await controller.toggleRecording()
         }
       } label: {
-        Label(
-          controller.capture.state.isRecording ? "Stop Recording" : "New Recording",
-          systemImage: controller.capture.state.isRecording ? "stop.fill" : "record.circle"
-        )
+        HStack {
+          Label(
+            controller.capture.state.isRecording ? "Stop Recording" : "New Recording",
+            systemImage: controller.capture.state.isRecording ? "stop.fill" : "record.circle"
+          )
+          if let shortcut = KeyboardShortcuts.getShortcut(for: .toggleMeetingRecording) {
+            Spacer(minLength: 6)
+            Text(shortcut.description)
+              .font(.caption.weight(.medium))
+              .opacity(0.6)
+          }
+        }
       }
       .buttonStyle(
         MeetingBarPrimaryButtonStyle(isRecording: controller.capture.state.isRecording)
       )
       .disabled(isTransitioning)
+      .help("Works from any app with the global shortcut")
     }
   }
 }

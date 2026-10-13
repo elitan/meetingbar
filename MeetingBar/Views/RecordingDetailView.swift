@@ -5,56 +5,71 @@ struct RecordingDetailView: View {
   @Bindable var recording: Recording
   let controller: AppController
   @Bindable var audioPlayback: AudioPlaybackController
+  /// The library search, highlighted in the transcript.
+  var highlight: String = ""
   let onDelete: () -> Void
   @State private var isEditingTitle = false
   @State private var draftTitle = ""
   @FocusState private var isTitleFocused: Bool
 
   var body: some View {
-    ScrollView {
-      VStack(alignment: .leading, spacing: 22) {
-        detailHeader
+    ScrollViewReader { proxy in
+      ScrollView {
+        VStack(alignment: .leading, spacing: 22) {
+          detailHeader
 
-        if let error = recording.errorMessage {
-          DetailAlertCard(
-            title: "This meeting needs attention",
-            message: error,
-            symbol: "exclamationmark.triangle.fill",
-            color: MeetingBarTheme.amber
-          ) {
-            if recording.status == .failed, controller.audioURL(for: recording) != nil {
-              Button("Retry Transcription") {
-                controller.retry(recording)
+          if let error = recording.errorMessage {
+            DetailAlertCard(
+              title: "This meeting needs attention",
+              message: error,
+              symbol: "exclamationmark.triangle.fill",
+              color: MeetingBarTheme.amber
+            ) {
+              if recording.status == .failed, controller.audioURL(for: recording) != nil {
+                Button("Retry Transcription") {
+                  controller.retry(recording)
+                }
+                .buttonStyle(MeetingBarPrimaryButtonStyle(fillsWidth: false))
               }
-              .buttonStyle(MeetingBarPrimaryButtonStyle(fillsWidth: false))
             }
           }
-        }
 
-        if !recording.captureWarnings.isEmpty {
-          warningCard
-        }
-
-        transcriptCard
-        HStack {
-          Label("Library and audio stored on this Mac", systemImage: "internaldrive.fill")
-            .font(.caption)
-            .foregroundStyle(.tertiary)
-          Spacer()
-          Button("Delete Meeting…", systemImage: "trash", role: .destructive) {
-            onDelete()
+          if !recording.captureWarnings.isEmpty {
+            warningCard
           }
-          .buttonStyle(.borderless)
-          .disabled(recording.isCapturing)
+
+          transcriptCard
+          HStack {
+            Label("Library and audio stored on this Mac", systemImage: "internaldrive.fill")
+              .font(.caption)
+              .foregroundStyle(.tertiary)
+            Spacer()
+            Button("Delete Meeting…", systemImage: "trash", role: .destructive) {
+              onDelete()
+            }
+            .buttonStyle(.borderless)
+            .disabled(recording.isCapturing)
+          }
+          .padding(.horizontal, 4)
         }
-        .padding(.horizontal, 4)
+        .padding(.horizontal, 34)
+        .padding(.vertical, 30)
+        .frame(maxWidth: 900, alignment: .leading)
+        .frame(maxWidth: .infinity)
       }
-      .padding(.horizontal, 34)
-      .padding(.vertical, 30)
-      .frame(maxWidth: 900, alignment: .leading)
-      .frame(maxWidth: .infinity)
+      .id(recording.id)
+      .task(id: "\(recording.id)|\(highlight)") {
+        // Bring the first search match into view, after the transcript has laid out.
+        guard let turnID = TranscriptTurn.firstTurn(in: recording.transcript, matching: highlight)
+        else {
+          return
+        }
+        try? await Task.sleep(for: .milliseconds(150))
+        withAnimation(.easeInOut(duration: 0.25)) {
+          proxy.scrollTo(TranscriptTurn.scrollID(turnID), anchor: .center)
+        }
+      }
     }
-    .id(recording.id)
     .safeAreaInset(edge: .bottom, spacing: 0) {
       sourceAudioCard
     }
@@ -144,15 +159,12 @@ struct RecordingDetailView: View {
       HStack(spacing: 9) {
         StatusBadge(recording: recording)
 
-        Label(
-          recording.startedAt.formatted(
-            .dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()
-          ),
-          systemImage: "calendar"
-        )
+        Label(MeetingDateText.string(for: recording.startedAt), systemImage: "calendar")
+          .help(recording.startedAt.formatted(date: .complete, time: .shortened))
 
-        Label(DurationText.string(seconds: recording.durationSeconds), systemImage: "clock")
+        Label(DurationText.compact(seconds: recording.durationSeconds), systemImage: "clock")
           .monospacedDigit()
+          .help(DurationText.string(seconds: recording.durationSeconds))
 
         if let language = recording.detectedLanguage {
           Label(language.uppercased(), systemImage: "character.bubble")
@@ -243,7 +255,7 @@ struct RecordingDetailView: View {
       }
       .padding(.vertical, 20)
 
-      TranscriptContentView(recording: recording)
+      TranscriptContentView(recording: recording, highlight: highlight)
         .padding(.top, 8)
         .padding(.bottom, 24)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -296,21 +308,27 @@ struct RecordingDetailView: View {
 
       VStack(alignment: .leading, spacing: 10) {
         HStack(spacing: 15) {
-          Button {
-            toggleAudioPlayback()
-          } label: {
-            Image(systemName: audioPlayback.isPlaying ? "pause.fill" : "play.fill")
-              .font(.system(size: 15, weight: .bold))
-              .foregroundStyle(MeetingBarTheme.text)
-              .frame(width: 42, height: 42)
-              .background(
-                MeetingBarTheme.selection,
-                in: Circle()
-              )
+          HStack(spacing: 6) {
+            skipButton(seconds: -15)
+
+            Button {
+              controller.togglePlayback(for: recording)
+            } label: {
+              Image(systemName: audioPlayback.isPlaying ? "pause.fill" : "play.fill")
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(MeetingBarTheme.text)
+                .frame(width: 42, height: 42)
+                .background(
+                  MeetingBarTheme.selection,
+                  in: Circle()
+                )
+            }
+            .buttonStyle(.plain)
+            .disabled(audioPlayback.isPreparing)
+            .help(audioPlayback.isPlaying ? "Pause (Space)" : "Play (Space)")
+
+            skipButton(seconds: 15)
           }
-          .buttonStyle(.plain)
-          .disabled(audioPlayback.isPreparing)
-          .help(audioPlayback.isPlaying ? "Pause" : "Play")
 
           Slider(
             value: Binding(
@@ -331,6 +349,8 @@ struct RecordingDetailView: View {
           .font(.caption.monospacedDigit())
           .foregroundStyle(.secondary)
           .fixedSize()
+
+          playbackRateMenu
 
           Button {
             controller.revealAudio(for: recording)
@@ -390,20 +410,40 @@ struct RecordingDetailView: View {
     }
   }
 
-  private func toggleAudioPlayback() {
-    if audioPlayback.isPrepared {
-      audioPlayback.toggle()
-      return
+  private func skipButton(seconds: TimeInterval) -> some View {
+    Button {
+      audioPlayback.skip(by: seconds)
+    } label: {
+      Image(systemName: seconds < 0 ? "gobackward.15" : "goforward.15")
+        .font(.system(size: 15, weight: .medium))
+        .frame(width: 30, height: 30)
     }
+    .buttonStyle(.plain)
+    .foregroundStyle(.secondary)
+    .disabled(!audioPlayback.isPrepared)
+    .help(seconds < 0 ? "Back 15 seconds" : "Forward 15 seconds")
+  }
 
-    guard let audioURL = controller.audioURL(for: recording) else {
-      return
+  private var playbackRateMenu: some View {
+    Menu {
+      Picker("Playback Speed", selection: $audioPlayback.rate) {
+        ForEach(AudioPlaybackController.rates, id: \.self) { rate in
+          Text(Self.rateLabel(rate)).tag(rate)
+        }
+      }
+      .pickerStyle(.inline)
+    } label: {
+      Text(Self.rateLabel(audioPlayback.rate))
+        .font(.caption.monospacedDigit().weight(.semibold))
     }
-    audioPlayback.prepareAndPlay(
-      recordingID: recording.id,
-      fallbackAudioURL: audioURL,
-      fileStore: controller.fileStore
-    )
+    .menuStyle(.borderlessButton)
+    .menuIndicator(.hidden)
+    .fixedSize()
+    .help("Playback speed")
+  }
+
+  private static func rateLabel(_ rate: Float) -> String {
+    rate.formatted(.number.precision(.fractionLength(0...2))) + "×"
   }
 
   private func beginTitleEdit() {
@@ -435,6 +475,7 @@ struct RecordingDetailView: View {
 
 private struct TranscriptContentView: View {
   let recording: Recording
+  let highlight: String
 
   var body: some View {
     switch recording.status {
@@ -446,7 +487,7 @@ private struct TranscriptContentView: View {
           symbol: "waveform.slash"
         )
       } else {
-        SpeakerTranscriptView(transcript: recording.transcript)
+        SpeakerTranscriptView(transcript: recording.transcript, highlight: highlight)
           .equatable()
       }
     case .transcribing:
@@ -480,9 +521,16 @@ private struct TranscriptContentView: View {
 
 private struct SpeakerTranscriptView: View, Equatable {
   let transcript: String
+  let highlight: String
 
   nonisolated static func == (lhs: SpeakerTranscriptView, rhs: SpeakerTranscriptView) -> Bool {
-    lhs.transcript == rhs.transcript
+    lhs.transcript == rhs.transcript && lhs.highlight == rhs.highlight
+  }
+
+  private func styled(_ text: String) -> AttributedString {
+    var match = AttributeContainer()
+    match.backgroundColor = MeetingBarTheme.amber.opacity(0.35)
+    return TranscriptSearch.highlighted(text, matching: highlight, with: match)
   }
 
   var body: some View {
@@ -498,16 +546,17 @@ private struct SpeakerTranscriptView: View, Equatable {
                   .font(.caption.weight(.semibold))
                   .foregroundStyle(.secondary)
               }
-              Text(turn.text)
+              Text(styled(turn.text))
                 .font(.system(size: 15))
                 .lineSpacing(6)
             }
           }
+          .id(TranscriptTurn.scrollID(turn.id))
         }
       }
       .textSelection(.enabled)
     } else {
-      Text(transcript)
+      Text(styled(transcript))
         .font(.system(size: 15))
         .lineSpacing(6)
         .textSelection(.enabled)
@@ -541,6 +590,19 @@ private struct TranscriptTurn: Identifiable {
   let id: Int
   let speakerID: Int?
   let text: String
+
+  static func scrollID(_ turnID: Int) -> String {
+    "transcript-turn-\(turnID)"
+  }
+
+  static func firstTurn(in transcript: String, matching query: String) -> Int? {
+    guard !query.isEmpty else {
+      return nil
+    }
+    return parse(transcript).first {
+      $0.text.range(of: query, options: [.caseInsensitive, .diacriticInsensitive]) != nil
+    }?.id
+  }
 
   static func parse(_ transcript: String) -> [TranscriptTurn] {
     transcript

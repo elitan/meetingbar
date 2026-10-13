@@ -11,6 +11,12 @@ final class AudioPlaybackController {
   private(set) var isPreparing = false
   private(set) var enhancementDescription: String?
   private(set) var errorMessage: String?
+  /// Kept across meetings so a preferred listening speed sticks while reviewing several recordings.
+  var rate: Float = 1 {
+    didSet { player?.rate = rate }
+  }
+
+  static let rates: [Float] = [1, 1.25, 1.5, 2]
 
   var isPrepared: Bool {
     player != nil
@@ -113,6 +119,10 @@ final class AudioPlaybackController {
     currentTime = clampedTime
   }
 
+  func skip(by seconds: TimeInterval) {
+    seek(to: currentTime + seconds)
+  }
+
   func unload(recordingID: UUID) {
     guard preparedRecordingID == recordingID else { return }
     unload()
@@ -166,6 +176,8 @@ final class AudioPlaybackController {
 
   private func installPlayer(url: URL) throws {
     let player = try AVAudioPlayer(contentsOf: url)
+    player.enableRate = true
+    player.rate = rate
     player.prepareToPlay()
     self.player = player
     currentURL = url

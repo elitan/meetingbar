@@ -33,9 +33,22 @@ enum MeetingBarWorkspace: String, CaseIterable, Identifiable {
 final class MeetingBarNavigation {
   var workspace: MeetingBarWorkspace = .library
   var settingsSection: SettingsSection = .capture
+  var selectedRecordingID: UUID?
+  /// Set by ⌘F; the library focuses its search field and clears the flag.
+  var wantsSearchFocus = false
 
   func showLibrary() {
     workspace = .library
+  }
+
+  func showRecording(_ id: UUID) {
+    workspace = .library
+    selectedRecordingID = id
+  }
+
+  func focusSearch() {
+    workspace = .library
+    wantsSearchFocus = true
   }
 
   func showSettings(_ section: SettingsSection? = nil) {
@@ -135,8 +148,8 @@ private final class MeetingBarWindowLifecycleView: NSView {
   }
 }
 
-private extension View {
-  func meetingBarPrimaryWindowBehavior() -> some View {
+extension View {
+  fileprivate func meetingBarPrimaryWindowBehavior() -> some View {
     background(MeetingBarPrimaryWindowBehavior().frame(width: 0, height: 0))
   }
 }
@@ -155,8 +168,19 @@ struct MeetingBarApp: App {
     }
 
     do {
-      let container = try ModelContainer(for: Recording.self)
-      let fileStore = try RecordingFileStore()
+      // As a test host, never open the real library. Unsigned test builds aren't sandboxed, so the
+      // default store would be ~/Library/Application Support/default.store, shared with other apps.
+      let container =
+        isRunningTests
+        ? try ModelContainer(
+          for: Recording.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        : try ModelContainer(for: Recording.self)
+      let fileStore =
+        isRunningTests
+        ? try RecordingFileStore(
+          rootURL: FileManager.default.temporaryDirectory.appending(
+            path: "MeetingBarTestHost", directoryHint: .isDirectory))
+        : try RecordingFileStore()
       modelContainer = container
       let secretStore: any TranscriptionSecretStoring =
         isRunningTests
@@ -177,6 +201,7 @@ struct MeetingBarApp: App {
   var body: some Scene {
     MenuBarExtra {
       MenuBarView(controller: controller, navigation: navigation)
+        .modelContainer(modelContainer)
     } label: {
       MenuBarStatusLabel(controller: controller, navigation: navigation)
     }
@@ -212,6 +237,15 @@ private struct MeetingBarCommands: Commands {
         openMainWindow()
       }
       .keyboardShortcut(",", modifiers: .command)
+    }
+
+    // SwiftUI text can't use the standard Find panel, so ⌘F searches the library instead.
+    CommandGroup(replacing: .textEditing) {
+      Button("Find Meetings") {
+        navigation.focusSearch()
+        openMainWindow()
+      }
+      .keyboardShortcut("f", modifiers: .command)
     }
 
     CommandMenu("MeetingBar") {

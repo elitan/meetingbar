@@ -520,6 +520,22 @@ final class AppController {
     return FileManager.default.fileExists(atPath: url.path) ? url : nil
   }
 
+  /// Plays or pauses a meeting, preparing balanced playback audio the first time.
+  func togglePlayback(for recording: Recording) {
+    if audioPlayback.isPrepared {
+      audioPlayback.toggle()
+      return
+    }
+    guard let audioURL = audioURL(for: recording) else {
+      return
+    }
+    audioPlayback.prepareAndPlay(
+      recordingID: recording.id,
+      fallbackAudioURL: audioURL,
+      fileStore: fileStore
+    )
+  }
+
   func revealAudio(for recording: Recording) {
     guard let url = audioURL(for: recording) else {
       return
